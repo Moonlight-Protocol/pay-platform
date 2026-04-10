@@ -1,10 +1,10 @@
 {
   "name": "@moonlight-protocol/pay-platform",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "exports": "./src/main.ts",
   "tasks": {
-    "serve": "deno run --allow-all src/main.ts",
+    "serve": "deno run --allow-all --unstable-otel src/main.ts",
     "test": "deno test --allow-all",
     "test:unit": "deno test --allow-all src/",
     "test:integration": "deno test --allow-all --no-check --config tests/deno.json tests/",
