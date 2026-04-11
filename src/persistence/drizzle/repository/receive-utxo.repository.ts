@@ -1,4 +1,4 @@
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import {
   receiveUtxo,
   type NewReceiveUtxo,
@@ -43,7 +43,7 @@ export class ReceiveUtxoRepository {
     await this.db
       .update(receiveUtxo)
       .set({ status: "RESERVED", updatedAt: new Date() })
-      .where(sql`${receiveUtxo.id} = ANY(${ids})`);
+      .where(inArray(receiveUtxo.id, ids));
   }
 
   async markSpent(ids: string[]): Promise<void> {
@@ -51,7 +51,7 @@ export class ReceiveUtxoRepository {
     await this.db
       .update(receiveUtxo)
       .set({ status: "SPENT", updatedAt: new Date() })
-      .where(sql`${receiveUtxo.id} = ANY(${ids})`);
+      .where(inArray(receiveUtxo.id, ids));
   }
 
   async release(ids: string[]): Promise<void> {
@@ -59,6 +59,6 @@ export class ReceiveUtxoRepository {
     await this.db
       .update(receiveUtxo)
       .set({ status: "AVAILABLE", updatedAt: new Date() })
-      .where(sql`${receiveUtxo.id} = ANY(${ids})`);
+      .where(inArray(receiveUtxo.id, ids));
   }
 }
