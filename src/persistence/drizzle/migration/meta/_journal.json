@@ -8,6 +8,20 @@
       "when": 1775060000000,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1775936400000,
+      "tag": "0001_councils",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776022800000,
+      "tag": "0002_receive_utxos_and_transactions",
+      "breakpoints": true
     }
   ]
 }
