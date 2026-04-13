@@ -2,10 +2,12 @@ import { type Context, Status } from "@oak/oak";
 import { drizzleClient } from "@/persistence/drizzle/config.ts";
 import { ReceiveUtxoRepository } from "@/persistence/drizzle/repository/receive-utxo.repository.ts";
 import { TransactionRepository } from "@/persistence/drizzle/repository/transaction.repository.ts";
+import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-account.repository.ts";
 import { LOG } from "@/config/logger.ts";
 
 const utxoRepo = new ReceiveUtxoRepository(drizzleClient);
 const txRepo = new TransactionRepository(drizzleClient);
+const accountRepo = new PayAccountRepository(drizzleClient);
 
 /**
  * POST /api/v1/pay/instant/submit
@@ -98,9 +100,26 @@ export const submitInstantHandler = async (ctx: Context) => {
       await utxoRepo.markSpent(merchantUtxoIds);
     }
 
-    // Record transactions for both parties
-    const [outTx, inTx] = await Promise.all([
-      txRepo.create({
+    // Record merchant IN transaction (merchant always has a pay-platform account)
+    const inTx = await txRepo.create({
+      walletPublicKey: merchantWallet,
+      direction: "IN",
+      status: "COMPLETED",
+      method: "CRYPTO_INSTANT",
+      amountStroops,
+      feeStroops: 0n,
+      counterparty: customerWallet,
+      description: description ?? null,
+      bundleId,
+      completedAt: new Date(),
+    });
+
+    // Record customer OUT transaction only if they have a pay-platform account.
+    // POS customers pay without registering — they just connect a wallet.
+    let outTxId: string | null = null;
+    const customerAccount = await accountRepo.findByPublicKey(customerWallet);
+    if (customerAccount) {
+      const outTx = await txRepo.create({
         walletPublicKey: customerWallet,
         direction: "OUT",
         status: "COMPLETED",
@@ -111,33 +130,22 @@ export const submitInstantHandler = async (ctx: Context) => {
         description: description ?? null,
         bundleId,
         completedAt: new Date(),
-      }),
-      txRepo.create({
-        walletPublicKey: merchantWallet,
-        direction: "IN",
-        status: "COMPLETED",
-        method: "CRYPTO_INSTANT",
-        amountStroops,
-        feeStroops: 0n,
-        counterparty: customerWallet,
-        description: description ?? null,
-        bundleId,
-        completedAt: new Date(),
-      }),
-    ]);
+      });
+      outTxId = outTx.id;
+    }
 
     LOG.info("Instant payment completed", {
       customerWallet,
       merchantWallet,
       amountStroops: amountStroops.toString(),
       bundleId,
-      outTxId: outTx.id,
       inTxId: inTx.id,
+      outTxId,
     });
 
     ctx.response.body = {
       data: {
-        transactionId: outTx.id,
+        transactionId: inTx.id,
         bundleId,
         status: "COMPLETED",
       },
