@@ -1,12 +1,14 @@
 import { type Context, Status } from "@oak/oak";
 import { drizzleClient } from "@/persistence/drizzle/config.ts";
 import { CouncilRepository } from "@/persistence/drizzle/repository/council.repository.ts";
+import { CouncilChannelRepository } from "@/persistence/drizzle/repository/council-channel.repository.ts";
 import { CouncilPpRepository } from "@/persistence/drizzle/repository/council-pp.repository.ts";
 import { ReceiveUtxoRepository } from "@/persistence/drizzle/repository/receive-utxo.repository.ts";
 import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-account.repository.ts";
 import { LOG } from "@/config/logger.ts";
 
 const councilRepo = new CouncilRepository(drizzleClient);
+const channelRepo = new CouncilChannelRepository(drizzleClient);
 const ppRepo = new CouncilPpRepository(drizzleClient);
 const utxoRepo = new ReceiveUtxoRepository(drizzleClient);
 const accountRepo = new PayAccountRepository(drizzleClient);
@@ -14,17 +16,22 @@ const accountRepo = new PayAccountRepository(drizzleClient);
 /**
  * POST /api/v1/pay/instant/prepare
  *
- * Body: { merchantWallet, amountXlm, customerWallet, payerJurisdiction? }
+ * Body: { merchantWallet, amountXlm, customerWallet, assetCode?, payerJurisdiction? }
  *
- * Returns the council config, a privacy provider URL, and the merchant's
- * receive UTXO public keys so the frontend can build the deposit operation.
- * The frontend signs the deposit with Freighter, then calls /submit.
+ * Returns the council config (including the channel for the requested asset),
+ * a privacy provider URL, and the merchant's receive UTXO public keys so
+ * the frontend can build the deposit operation.
  */
 export const prepareInstantHandler = async (ctx: Context) => {
   try {
     const body = await ctx.request.body.json().catch(() => ({}));
-    const { merchantWallet, amountXlm, customerWallet, payerJurisdiction } =
-      body;
+    const {
+      merchantWallet,
+      amountXlm,
+      customerWallet,
+      assetCode: requestedAsset,
+      payerJurisdiction,
+    } = body;
 
     if (!merchantWallet || !amountXlm || !customerWallet) {
       ctx.response.status = Status.BadRequest;
@@ -33,6 +40,8 @@ export const prepareInstantHandler = async (ctx: Context) => {
       };
       return;
     }
+
+    const assetCode = requestedAsset || "XLM";
 
     const amount = parseFloat(amountXlm);
     if (isNaN(amount) || amount <= 0) {
@@ -49,9 +58,7 @@ export const prepareInstantHandler = async (ctx: Context) => {
       return;
     }
 
-    // Find a council covering both jurisdictions.
-    // If payerJurisdiction is provided, check for a direct pair.
-    // If not, pick any active council that covers the merchant's jurisdiction.
+    // Find a council covering the merchant's jurisdiction
     let councils;
     if (payerJurisdiction) {
       councils = await councilRepo.findByJurisdictionPair(
@@ -61,15 +68,14 @@ export const prepareInstantHandler = async (ctx: Context) => {
       if (councils.length === 0) {
         ctx.response.status = Status.UnprocessableEntity;
         ctx.response.body = {
-          message: `No council available for ${payerJurisdiction} → ${merchant.jurisdictionCountryCode}`,
+          message:
+            `No council available for ${payerJurisdiction} → ${merchant.jurisdictionCountryCode}`,
         };
         return;
       }
     } else {
-      councils = await councilRepo.findActive();
-      // Filter to councils that at least cover the merchant's jurisdiction
-      councils = councils.filter((c) =>
-        c.jurisdictionCodes.includes(merchant.jurisdictionCountryCode)
+      councils = await councilRepo.findByJurisdiction(
+        merchant.jurisdictionCountryCode,
       );
       if (councils.length === 0) {
         ctx.response.status = Status.ServiceUnavailable;
@@ -80,11 +86,31 @@ export const prepareInstantHandler = async (ctx: Context) => {
       }
     }
 
-    // Pick one council (first available — random/round-robin later)
-    const council = councils[0];
+    // Find a council that has the requested asset channel
+    let selectedCouncil = null;
+    let selectedChannel = null;
+    for (const c of councils) {
+      const channel = await channelRepo.findByCouncilIdAndAsset(
+        c.id,
+        assetCode,
+      );
+      if (channel) {
+        selectedCouncil = c;
+        selectedChannel = channel;
+        break;
+      }
+    }
+
+    if (!selectedCouncil || !selectedChannel) {
+      ctx.response.status = Status.ServiceUnavailable;
+      ctx.response.body = {
+        message: `No ${assetCode} channel available in any council for this jurisdiction`,
+      };
+      return;
+    }
 
     // Pick a privacy provider within the council
-    const pps = await ppRepo.findActiveByCouncilId(council.id);
+    const pps = await ppRepo.findActiveByCouncilId(selectedCouncil.id);
     if (pps.length === 0) {
       ctx.response.status = Status.ServiceUnavailable;
       ctx.response.body = {
@@ -112,19 +138,25 @@ export const prepareInstantHandler = async (ctx: Context) => {
     LOG.info("Instant payment prepared", {
       customerWallet,
       merchantWallet,
+      assetCode,
       amountStroops: amountStroops.toString(),
-      councilId: council.id,
+      councilId: selectedCouncil.id,
+      channelId: selectedChannel.id,
       ppId: pp.id,
     });
 
     ctx.response.body = {
       data: {
         council: {
-          id: council.id,
-          channelAuthId: council.channelAuthId,
-          privacyChannelId: council.privacyChannelId,
-          assetId: council.assetId,
-          networkPassphrase: council.networkPassphrase,
+          id: selectedCouncil.id,
+          channelAuthId: selectedCouncil.channelAuthId,
+          networkPassphrase: selectedCouncil.networkPassphrase,
+        },
+        channel: {
+          id: selectedChannel.id,
+          assetCode: selectedChannel.assetCode,
+          assetContractId: selectedChannel.assetContractId,
+          privacyChannelId: selectedChannel.privacyChannelId,
         },
         pp: {
           url: pp.url,

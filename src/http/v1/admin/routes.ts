@@ -2,10 +2,13 @@ import { Router } from "@oak/oak";
 import { adminMiddleware } from "@/http/middleware/admin/index.ts";
 import {
   createCouncil,
+  createCouncilChannel,
   createCouncilPp,
   deleteCouncil,
+  deleteCouncilChannel,
   deleteCouncilPp,
   getCouncil,
+  listCouncilChannels,
   listCouncilPps,
   listCouncils,
   updateCouncil,
@@ -23,6 +26,11 @@ adminRouter.post("/councils", createCouncil);
 adminRouter.get("/councils/:id", getCouncil);
 adminRouter.patch("/councils/:id", updateCouncil);
 adminRouter.delete("/councils/:id", deleteCouncil);
+
+// Council Channels (nested under council)
+adminRouter.get("/councils/:councilId/channels", listCouncilChannels);
+adminRouter.post("/councils/:councilId/channels", createCouncilChannel);
+adminRouter.delete("/councils/:councilId/channels/:channelId", deleteCouncilChannel);
 
 // Council PPs (nested under council)
 adminRouter.get("/councils/:councilId/pps", listCouncilPps);

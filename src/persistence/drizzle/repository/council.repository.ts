@@ -4,6 +4,7 @@ import {
   type Council,
   type NewCouncil,
 } from "@/persistence/drizzle/entity/council.entity.ts";
+import { councilJurisdiction } from "@/persistence/drizzle/entity/council-jurisdiction.entity.ts";
 import type { DrizzleClient } from "@/persistence/drizzle/config.ts";
 
 export class CouncilRepository {
@@ -31,21 +32,34 @@ export class CouncilRepository {
 
   /**
    * Find active councils that serve BOTH the payer and receiver jurisdictions.
-   * jurisdiction_codes is a comma-separated string; we check that both codes
-   * appear in it.
    */
   async findByJurisdictionPair(
     payerCode: string,
     receiverCode: string,
   ): Promise<Council[]> {
     return this.db
-      .select()
+      .selectDistinct()
       .from(council)
       .where(
         and(
           eq(council.active, true),
-          sql`${council.jurisdictionCodes} LIKE ${"%" + payerCode + "%"}`,
-          sql`${council.jurisdictionCodes} LIKE ${"%" + receiverCode + "%"}`,
+          sql`EXISTS (SELECT 1 FROM ${councilJurisdiction} WHERE ${councilJurisdiction.councilId} = ${council.id} AND ${councilJurisdiction.countryCode} = ${payerCode})`,
+          sql`EXISTS (SELECT 1 FROM ${councilJurisdiction} WHERE ${councilJurisdiction.councilId} = ${council.id} AND ${councilJurisdiction.countryCode} = ${receiverCode})`,
+        ),
+      );
+  }
+
+  /**
+   * Find active councils that serve a given jurisdiction.
+   */
+  async findByJurisdiction(countryCode: string): Promise<Council[]> {
+    return this.db
+      .selectDistinct()
+      .from(council)
+      .where(
+        and(
+          eq(council.active, true),
+          sql`EXISTS (SELECT 1 FROM ${councilJurisdiction} WHERE ${councilJurisdiction.councilId} = ${council.id} AND ${councilJurisdiction.countryCode} = ${countryCode})`,
         ),
       );
   }
