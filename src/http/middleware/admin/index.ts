@@ -1,6 +1,7 @@
 import type { Context } from "@oak/oak";
 import { jwtMiddleware, type JwtSessionData } from "@/http/middleware/auth/index.ts";
 import { LOG } from "@/config/logger.ts";
+import { loadOptionalEnv } from "@/utils/env/loadEnv.ts";
 
 /**
  * Admin allowlist: wallet public keys that are allowed to access /admin routes.
@@ -12,7 +13,7 @@ import { LOG } from "@/config/logger.ts";
  * Example: ADMIN_WALLETS=GABC...,GDEF...
  */
 function getAdminWallets(): Set<string> {
-  const raw = Deno.env.get("ADMIN_WALLETS") ?? "";
+  const raw = loadOptionalEnv("ADMIN_WALLETS") ?? "";
   const wallets = new Set(
     raw
       .split(",")
