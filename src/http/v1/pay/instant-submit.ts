@@ -1,10 +1,17 @@
 import { type Context, Status } from "@oak/oak";
 import { drizzleClient } from "@/persistence/drizzle/config.ts";
+import { CouncilRepository } from "@/persistence/drizzle/repository/council.repository.ts";
+import { CouncilChannelRepository } from "@/persistence/drizzle/repository/council-channel.repository.ts";
+import { CouncilPpRepository } from "@/persistence/drizzle/repository/council-pp.repository.ts";
 import { ReceiveUtxoRepository } from "@/persistence/drizzle/repository/receive-utxo.repository.ts";
 import { TransactionRepository } from "@/persistence/drizzle/repository/transaction.repository.ts";
 import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-account.repository.ts";
+import { getProviderJwt } from "@/core/service/provider-auth.ts";
 import { LOG } from "@/config/logger.ts";
 
+const councilRepo = new CouncilRepository(drizzleClient);
+const channelRepo = new CouncilChannelRepository(drizzleClient);
+const ppRepo = new CouncilPpRepository(drizzleClient);
 const utxoRepo = new ReceiveUtxoRepository(drizzleClient);
 const txRepo = new TransactionRepository(drizzleClient);
 const accountRepo = new PayAccountRepository(drizzleClient);
@@ -16,24 +23,21 @@ const accountRepo = new PayAccountRepository(drizzleClient);
  *   customerWallet,
  *   merchantWallet,
  *   amountStroops,
+ *   assetCode,
  *   description?,
- *   signedDepositMLXDR,        — the customer-signed deposit operation
- *   tempCreateMLXDRs,          — CREATE ops at temp keys (built by frontend)
- *   tempSpendMLXDRs,           — SPEND ops from temp keys (signed by frontend with temp keys)
- *   merchantCreateMLXDRs,      — CREATE ops at merchant's receive UTXOs
- *   merchantUtxoIds,           — IDs to mark as SPENT
- *   ppUrl,                     — where to submit the bundle
- *   ppAuthToken,               — JWT for provider-platform
- *   channelContractId,         — privacy channel contract ID
+ *   operationsMLXDR,       — all operations built by the frontend
+ *   merchantUtxoIds,       — IDs to mark as SPENT
  * }
  *
- * The frontend has already built ALL operations (deposit + temp creates +
- * temp spends + merchant creates) because it holds the customer's signing
- * context. pay-platform's job here is:
- *   1. Assemble the operations into a bundle
- *   2. Submit to provider-platform
- *   3. Record the transaction
- *   4. Mark merchant UTXOs as SPENT
+ * The frontend builds ALL operations (deposit + temp creates + temp spends +
+ * merchant creates) because it holds the customer's signing context.
+ *
+ * Pay-platform's job:
+ *   1. Look up the council + channel + PP from the asset code and merchant jurisdiction
+ *   2. Authenticate with provider-platform server-side (PAY_SERVICE_SK)
+ *   3. Submit the bundle to provider-platform
+ *   4. Record the transaction
+ *   5. Mark merchant UTXOs as SPENT
  */
 export const submitInstantHandler = async (ctx: Context) => {
   try {
@@ -42,35 +46,87 @@ export const submitInstantHandler = async (ctx: Context) => {
       customerWallet,
       merchantWallet,
       amountStroops: amountStr,
+      assetCode: requestedAsset,
       description,
       operationsMLXDR,
       merchantUtxoIds,
-      ppUrl,
-      ppAuthToken,
-      channelContractId,
     } = body;
 
     if (
       !customerWallet || !merchantWallet || !amountStr || !operationsMLXDR ||
-      !ppUrl || !ppAuthToken || !channelContractId
+      !Array.isArray(operationsMLXDR)
     ) {
       ctx.response.status = Status.BadRequest;
       ctx.response.body = { message: "Missing required fields" };
       return;
     }
 
+    const assetCode = requestedAsset || "XLM";
     const amountStroops = BigInt(amountStr);
 
+    // Look up merchant to get jurisdiction
+    const merchant = await accountRepo.findByPublicKey(merchantWallet);
+    if (!merchant) {
+      ctx.response.status = Status.NotFound;
+      ctx.response.body = { message: "Merchant not found" };
+      return;
+    }
+
+    // Find a council covering the merchant's jurisdiction with the requested asset
+    const councils = await councilRepo.findByJurisdiction(
+      merchant.jurisdictionCountryCode,
+    );
+
+    let selectedCouncil = null;
+    let selectedChannel = null;
+    for (const c of councils) {
+      const channel = await channelRepo.findByCouncilIdAndAsset(
+        c.id,
+        assetCode,
+      );
+      if (channel) {
+        selectedCouncil = c;
+        selectedChannel = channel;
+        break;
+      }
+    }
+
+    if (!selectedCouncil || !selectedChannel) {
+      ctx.response.status = Status.ServiceUnavailable;
+      ctx.response.body = {
+        message: `No ${assetCode} channel available for this merchant`,
+      };
+      if (Array.isArray(merchantUtxoIds)) {
+        await utxoRepo.release(merchantUtxoIds);
+      }
+      return;
+    }
+
+    // Pick a PP
+    const pps = await ppRepo.findActiveByCouncilId(selectedCouncil.id);
+    if (pps.length === 0) {
+      ctx.response.status = Status.ServiceUnavailable;
+      ctx.response.body = { message: "No privacy provider available" };
+      if (Array.isArray(merchantUtxoIds)) {
+        await utxoRepo.release(merchantUtxoIds);
+      }
+      return;
+    }
+    const pp = pps[Math.floor(Math.random() * pps.length)];
+
+    // Authenticate with provider-platform server-side
+    const providerJwt = await getProviderJwt(pp.url);
+
     // Submit the bundle to provider-platform
-    const bundleRes = await fetch(`${ppUrl}/api/v1/bundle`, {
+    const bundleRes = await fetch(`${pp.url}/api/v1/bundle`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${ppAuthToken}`,
+        "Authorization": `Bearer ${providerJwt}`,
       },
       body: JSON.stringify({
         operationsMLXDR,
-        channelContractId,
+        channelContractId: selectedChannel.privacyChannelId,
       }),
     });
 
@@ -84,7 +140,6 @@ export const submitInstantHandler = async (ctx: Context) => {
       ctx.response.body = {
         message: "Payment processing failed — provider rejected the bundle",
       };
-      // Release the reserved UTXOs
       if (Array.isArray(merchantUtxoIds)) {
         await utxoRepo.release(merchantUtxoIds);
       }
@@ -100,7 +155,7 @@ export const submitInstantHandler = async (ctx: Context) => {
       await utxoRepo.markSpent(merchantUtxoIds);
     }
 
-    // Record merchant IN transaction (merchant always has a pay-platform account)
+    // Record merchant IN transaction
     const inTx = await txRepo.create({
       walletPublicKey: merchantWallet,
       direction: "IN",
@@ -114,8 +169,7 @@ export const submitInstantHandler = async (ctx: Context) => {
       completedAt: new Date(),
     });
 
-    // Record customer OUT transaction only if they have a pay-platform account.
-    // POS customers pay without registering — they just connect a wallet.
+    // Record customer OUT transaction only if they have a pay-platform account
     let outTxId: string | null = null;
     const customerAccount = await accountRepo.findByPublicKey(customerWallet);
     if (customerAccount) {
@@ -137,6 +191,7 @@ export const submitInstantHandler = async (ctx: Context) => {
     LOG.info("Instant payment completed", {
       customerWallet,
       merchantWallet,
+      assetCode,
       amountStroops: amountStroops.toString(),
       bundleId,
       inTxId: inTx.id,

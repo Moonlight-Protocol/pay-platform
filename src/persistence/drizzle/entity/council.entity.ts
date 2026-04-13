@@ -2,21 +2,18 @@ import { pgTable, text, boolean, uuid } from "drizzle-orm/pg-core";
 import { createBaseColumns } from "@/persistence/drizzle/entity/base.entity.ts";
 
 /**
- * councils: Moonlight Pay's view of which councils serve which jurisdictions.
+ * councils: top-level council record.
  *
- * Each row represents a council the system can route transactions through.
- * The jurisdiction_codes column is a comma-separated list of ISO 3166-1
- * alpha-2 codes the council covers. Transaction routing finds a council
- * whose jurisdiction_codes include both the payer and receiver jurisdictions.
+ * A council is identified by its on-chain Channel Auth contract. It can
+ * have multiple asset channels (council_channels), serve multiple
+ * jurisdictions (council_jurisdictions), and have multiple privacy
+ * providers (council_pps).
  */
 export const council = pgTable("councils", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
   channelAuthId: text("channel_auth_id").notNull(),
-  privacyChannelId: text("privacy_channel_id").notNull(),
-  assetId: text("asset_id").notNull(),
   networkPassphrase: text("network_passphrase").notNull(),
-  jurisdictionCodes: text("jurisdiction_codes").notNull(),
   active: boolean("active").notNull().default(true),
   ...createBaseColumns(),
 });
