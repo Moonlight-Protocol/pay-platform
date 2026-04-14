@@ -1,6 +1,5 @@
 import { Application } from "@oak/oak";
 
-import { globalRateLimitMiddleware } from "@/http/middleware/rate-limit/index.ts";
 import apiV1 from "@/http/v1/v1.routes.ts";
 import { appendRequestIdMiddleware } from "@/http/middleware/append-request-id.ts";
 import { appendResponseHeadersMiddleware } from "@/http/middleware/append-response-headers.ts";
@@ -13,7 +12,6 @@ async function bootstrap() {
     const app = new Application();
 
     app.use(corsMiddleware);
-    app.use(globalRateLimitMiddleware);
     app.use(appendRequestIdMiddleware);
     app.use(appendResponseHeadersMiddleware);
     app.use(apiV1.routes());
