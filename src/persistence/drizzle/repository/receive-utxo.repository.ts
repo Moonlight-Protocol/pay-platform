@@ -38,6 +38,14 @@ export class ReceiveUtxoRepository {
       .limit(limit);
   }
 
+  async findByIds(ids: string[]): Promise<ReceiveUtxo[]> {
+    if (ids.length === 0) return [];
+    return this.db
+      .select()
+      .from(receiveUtxo)
+      .where(inArray(receiveUtxo.id, ids));
+  }
+
   async reserve(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
     await this.db
