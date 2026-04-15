@@ -29,6 +29,13 @@
       "when": 1776109200000,
       "tag": "0003_council_channels_and_jurisdictions",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1776195600000,
+      "tag": "0004_add_opex_and_fee",
+      "breakpoints": true
     }
   ]
 }
