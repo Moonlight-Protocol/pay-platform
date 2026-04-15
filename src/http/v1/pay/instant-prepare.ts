@@ -162,6 +162,10 @@ export const prepareInstantHandler = async (ctx: Context) => {
           url: pp.url,
           publicKey: pp.publicKey,
         },
+        opex: {
+          publicKey: merchant.opexPublicKey ?? null,
+          feePct: merchant.feePct ? Number(merchant.feePct) : null,
+        },
         merchantUtxos: merchantUtxos.map((u) => ({
           id: u.id,
           utxoPublicKey: u.utxoPublicKey,

@@ -12,3 +12,6 @@ export const SESSION_TTL = Number(requireEnv("SESSION_TTL"));
 
 /** Stellar secret key for authenticating with provider-platform. */
 export const PAY_SERVICE_SK = loadOptionalEnv("PAY_SERVICE_SK");
+
+/** Stellar/Soroban RPC endpoint for on-chain operations. */
+export const STELLAR_RPC_URL = requireEnv("STELLAR_RPC_URL");

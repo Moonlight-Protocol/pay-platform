@@ -1,6 +1,6 @@
 {
   "name": "@moonlight-protocol/pay-platform",
-  "version": "0.3.3",
+  "version": "0.3.2",
   "license": "MIT",
   "exports": "./src/main.ts",
   "tasks": {
@@ -31,6 +31,8 @@
     "tslib": "npm:tslib@2.5.0",
     "@noble/hashes": "jsr:@noble/hashes@^1.6.1",
     "@noble/hashes/sha256": "jsr:@noble/hashes@^1.6.1/sha256",
+    "@noble/curves": "jsr:@noble/curves@^1.8.0",
+    "@noble/curves/p256": "jsr:@noble/curves@^1.8.0/p256",
     "stellar-sdk": "npm:@stellar/stellar-sdk@14.6.1",
     "buffer": "npm:buffer@^6.0.3",
     "@moonlight/moonlight-sdk": "jsr:@moonlight/moonlight-sdk@^0.7.0",
