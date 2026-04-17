@@ -2,6 +2,7 @@ import type { Context } from "@oak/oak";
 import { jwtMiddleware, type JwtSessionData } from "@/http/middleware/auth/index.ts";
 import { LOG } from "@/config/logger.ts";
 import { loadOptionalEnv } from "@/utils/env/loadEnv.ts";
+import { MODE } from "@/config/env.ts";
 
 /**
  * Admin allowlist: wallet public keys that are allowed to access /admin routes.
@@ -42,6 +43,12 @@ export async function adminMiddleware(
       LOG.warn("Admin access attempted but ADMIN_WALLETS is empty");
       ctx.response.status = 403;
       ctx.response.body = { message: "Admin access not configured" };
+      return;
+    }
+
+    // In development mode, skip the allowlist check
+    if (MODE === "development") {
+      await next();
       return;
     }
 

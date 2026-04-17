@@ -13,7 +13,6 @@ export const council = pgTable("councils", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
   channelAuthId: text("channel_auth_id").notNull(),
-  networkPassphrase: text("network_passphrase").notNull(),
   active: boolean("active").notNull().default(true),
   ...createBaseColumns(),
 });

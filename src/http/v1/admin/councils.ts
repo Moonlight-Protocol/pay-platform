@@ -44,18 +44,17 @@ export const getCouncil = async (ctx: RouterContext<string>) => {
 export const createCouncil = async (ctx: Context) => {
   try {
     const body = await ctx.request.body.json();
-    const { name, channelAuthId, networkPassphrase, channels, jurisdictions, active } = body;
+    const { name, channelAuthId, channels, jurisdictions, active } = body;
 
-    if (!name || !channelAuthId || !networkPassphrase) {
+    if (!name || !channelAuthId) {
       ctx.response.status = Status.BadRequest;
-      ctx.response.body = { message: "name, channelAuthId, and networkPassphrase are required" };
+      ctx.response.body = { message: "name and channelAuthId are required" };
       return;
     }
 
     const row = await councilRepo.create({
       name,
       channelAuthId,
-      networkPassphrase,
       active: active ?? true,
     });
 
@@ -134,6 +133,57 @@ export const deleteCouncil = async (ctx: RouterContext<string>) => {
     return;
   }
   ctx.response.status = Status.NoContent;
+};
+
+/**
+ * POST /admin/councils/discover
+ * Proxy: fetches council info from a council-platform URL server-side.
+ */
+export const discoverCouncil = async (ctx: Context) => {
+  try {
+    const body = await ctx.request.body.json();
+    const { councilUrl } = body;
+
+    if (!councilUrl || typeof councilUrl !== "string") {
+      ctx.response.status = Status.BadRequest;
+      ctx.response.body = { message: "councilUrl is required" };
+      return;
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(councilUrl);
+    } catch {
+      ctx.response.status = Status.BadRequest;
+      ctx.response.body = { message: "Invalid URL" };
+      return;
+    }
+
+    let councilId = parsed.searchParams.get("council");
+    if (!councilId) {
+      const hashMatch = councilUrl.match(/[#?&]council=([A-Z0-9]+)/);
+      if (hashMatch) councilId = hashMatch[1];
+    }
+
+    const baseUrl = `${parsed.origin}`;
+    const qs = councilId ? `?councilId=${encodeURIComponent(councilId)}` : "";
+
+    const res = await fetch(`${baseUrl}/api/v1/public/council${qs}`);
+    if (!res.ok) {
+      ctx.response.status = res.status;
+      ctx.response.body = { message: `Council platform returned ${res.status}` };
+      return;
+    }
+
+    const data = await res.json();
+    ctx.response.body = data;
+  } catch (error) {
+    LOG.error("Failed to discover council", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    ctx.response.status = Status.InternalServerError;
+    ctx.response.body = { message: "Failed to discover council" };
+  }
 };
 
 // ─── Council Channels ──────────────────────────────────────

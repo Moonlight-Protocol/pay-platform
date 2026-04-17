@@ -7,6 +7,7 @@ import {
   deleteCouncil,
   deleteCouncilChannel,
   deleteCouncilPp,
+  discoverCouncil,
   getCouncil,
   listCouncilChannels,
   listCouncilPps,
@@ -21,6 +22,7 @@ const adminRouter = new Router({ prefix: "/admin" });
 adminRouter.use(adminMiddleware);
 
 // Councils
+adminRouter.post("/councils/discover", discoverCouncil);
 adminRouter.get("/councils", listCouncils);
 adminRouter.post("/councils", createCouncil);
 adminRouter.get("/councils/:id", getCouncil);

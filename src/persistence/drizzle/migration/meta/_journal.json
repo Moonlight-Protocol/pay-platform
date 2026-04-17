@@ -36,6 +36,13 @@
       "when": 1776195600000,
       "tag": "0004_add_opex_and_fee",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776282000000,
+      "tag": "0005_drop_network_passphrase",
+      "breakpoints": true
     }
   ]
 }
