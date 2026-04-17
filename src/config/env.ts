@@ -15,3 +15,15 @@ export const PAY_SERVICE_SK = loadOptionalEnv("PAY_SERVICE_SK");
 
 /** Stellar/Soroban RPC endpoint for on-chain operations. */
 export const STELLAR_RPC_URL = requireEnv("STELLAR_RPC_URL");
+
+/** Network passphrase derived from MODE. */
+export const STELLAR_NETWORK_PASSPHRASE = (() => {
+  switch (MODE) {
+    case "production":
+      return "Public Global Stellar Network ; September 2015";
+    case "development":
+      return "Standalone Network ; February 2017";
+    default:
+      return "Test SDF Network ; September 2015";
+  }
+})();

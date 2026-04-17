@@ -11,7 +11,7 @@ import { TransactionRepository } from "@/persistence/drizzle/repository/transact
 import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-account.repository.ts";
 import { decryptSk } from "@/core/crypto/encrypt-sk.ts";
 import { getProviderJwt } from "@/core/service/provider-auth.ts";
-import { SERVICE_AUTH_SECRET, STELLAR_RPC_URL } from "@/config/env.ts";
+import { SERVICE_AUTH_SECRET, STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from "@/config/env.ts";
 import { LOG } from "@/config/logger.ts";
 
 const councilRepo = new CouncilRepository(drizzleClient);
@@ -141,7 +141,7 @@ export const executeInstantHandler = async (ctx: Context) => {
     // ─── 5. Decrypt OpEx SK and deposit into channel ───────
     const opexSk = await decryptSk(merchant.encryptedOpexSk, SERVICE_AUTH_SECRET);
     const opexKeypair = Keypair.fromSecret(opexSk);
-    const networkPassphrase = selectedCouncil.networkPassphrase;
+    const networkPassphrase = STELLAR_NETWORK_PASSPHRASE;
 
     const server = new rpc.Server(STELLAR_RPC_URL, {
       allowHttp: STELLAR_RPC_URL.startsWith("http://"),

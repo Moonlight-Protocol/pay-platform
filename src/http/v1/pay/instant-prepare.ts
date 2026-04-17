@@ -6,6 +6,7 @@ import { CouncilPpRepository } from "@/persistence/drizzle/repository/council-pp
 import { ReceiveUtxoRepository } from "@/persistence/drizzle/repository/receive-utxo.repository.ts";
 import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-account.repository.ts";
 import { LOG } from "@/config/logger.ts";
+import { STELLAR_NETWORK_PASSPHRASE } from "@/config/env.ts";
 
 const councilRepo = new CouncilRepository(drizzleClient);
 const channelRepo = new CouncilChannelRepository(drizzleClient);
@@ -150,7 +151,7 @@ export const prepareInstantHandler = async (ctx: Context) => {
         council: {
           id: selectedCouncil.id,
           channelAuthId: selectedCouncil.channelAuthId,
-          networkPassphrase: selectedCouncil.networkPassphrase,
+          networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
         },
         channel: {
           id: selectedChannel.id,
