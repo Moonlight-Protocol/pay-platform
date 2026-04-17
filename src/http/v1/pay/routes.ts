@@ -13,8 +13,8 @@ const payRouter = new Router();
 payRouter.post("/pay/instant/prepare", prepareInstantHandler);
 
 /**
- * POST /pay/instant/submit — receives the frontend-built MLXDR bundle
- * (used by the self-custodial flow). Pay-platform forwards to provider-platform.
+ * POST /pay/instant/submit — receives a frontend-built MLXDR bundle
+ * and forwards it to provider-platform.
  */
 payRouter.post("/pay/instant/submit", submitInstantHandler);
 
