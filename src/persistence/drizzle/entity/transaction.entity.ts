@@ -12,7 +12,6 @@ export const txStatusEnum = pgEnum("tx_status", [
 
 export const txMethodEnum = pgEnum("tx_method", [
   "CRYPTO_INSTANT",
-  "CRYPTO_SELF_CUSTODIAL",
 ]);
 
 /**
