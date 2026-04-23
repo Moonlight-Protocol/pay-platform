@@ -81,6 +81,20 @@ export const createCouncil = async (ctx: Context) => {
       );
     }
 
+    // Create privacy providers if discovered from council-platform
+    const providers: unknown[] = Array.isArray(body.providers) ? body.providers : [];
+    for (const pp of providers) {
+      const p = pp as Record<string, unknown>;
+      if (!p.publicKey || !p.providerUrl) continue;
+      await ppRepo.create({
+        councilId: row.id,
+        name: (typeof p.label === "string" && p.label) || String(p.publicKey).substring(0, 8),
+        url: String(p.providerUrl),
+        publicKey: String(p.publicKey),
+        active: true,
+      });
+    }
+
     LOG.info("Council created", { id: row.id, name });
     ctx.response.status = Status.Created;
     ctx.response.body = { data: row };
