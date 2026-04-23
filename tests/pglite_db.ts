@@ -10,23 +10,42 @@ import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import * as schema from "@/persistence/drizzle/entity/index.ts";
 
-const MIGRATION = `
-  CREATE TABLE IF NOT EXISTS pay_accounts (
-    wallet_public_key TEXT PRIMARY KEY,
-    email TEXT NOT NULL,
-    jurisdiction_country_code TEXT NOT NULL,
-    display_name TEXT,
-    opex_public_key TEXT,
-    encrypted_opex_sk TEXT,
-    fee_pct NUMERIC(5,2),
-    last_seen_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by TEXT,
-    updated_by TEXT,
-    deleted_at TIMESTAMPTZ
+// ── Migration runner ──────────────────────────────────────────────────
+// Read migration files from the drizzle migration folder at runtime,
+// using _journal.json for ordering. This keeps tests in sync with the
+// actual schema without maintaining hardcoded SQL.
+
+const MIGRATION_FOLDER = new URL(
+  "../src/persistence/drizzle/migration",
+  import.meta.url,
+).pathname;
+
+interface JournalEntry {
+  idx: number;
+  tag: string;
+}
+
+async function runMigrations(pg: PGlite): Promise<void> {
+  const journalRaw = await Deno.readTextFile(
+    `${MIGRATION_FOLDER}/meta/_journal.json`,
   );
-`;
+  const journal = JSON.parse(journalRaw);
+  const entries: JournalEntry[] = journal.entries;
+
+  for (const entry of entries) {
+    const sql = await Deno.readTextFile(
+      `${MIGRATION_FOLDER}/${entry.tag}.sql`,
+    );
+    const statements = sql
+      .split("--> statement-breakpoint")
+      .map((s: string) => s.trim())
+      .filter(Boolean);
+
+    for (const stmt of statements) {
+      await pg.exec(stmt);
+    }
+  }
+}
 
 type PGliteDrizzle = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -38,7 +57,7 @@ async function ensureInitialized() {
   if (_initialized) return;
 
   pg = new PGlite();
-  await pg.exec(MIGRATION);
+  await runMigrations(pg);
 
   _drizzleClient = drizzle({ client: pg, schema });
   _initialized = true;
