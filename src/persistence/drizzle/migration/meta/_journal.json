@@ -50,6 +50,13 @@
       "when": 1776368400000,
       "tag": "0006_remove_self_custodial",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1745366400000,
+      "tag": "0007_add_waitlist_requests",
+      "breakpoints": true
     }
   ]
 }
