@@ -13,6 +13,7 @@
     "@/core/service/auth/service/service-auth-secret.ts": "./mock_service_auth_secret.ts",
 
     "@electric-sql/pglite": "npm:@electric-sql/pglite@^0.2.17",
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0",
 
     "@colibri/core": "jsr:@colibri/core@^0.16.1",
     "@stellar/stellar-sdk": "npm:@stellar/stellar-sdk@14.6.1",
