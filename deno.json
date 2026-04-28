@@ -1,6 +1,6 @@
 {
   "name": "@moonlight-protocol/pay-platform",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "license": "MIT",
   "exports": "./src/main.ts",
   "tasks": {
@@ -39,6 +39,7 @@
     "@oak/oak": "jsr:@oak/oak@^17.1.4",
     "@std/assert": "jsr:@std/assert@^1.0.0",
     "zod": "npm:zod@3.24.2",
-    "chalk": "npm:chalk@^5.3.0"
+    "chalk": "npm:chalk@^5.3.0",
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0"
   }
 }
