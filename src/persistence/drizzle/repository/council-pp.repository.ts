@@ -1,7 +1,7 @@
-import { eq, and } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
-  councilPp,
   type CouncilPp,
+  councilPp,
   type NewCouncilPp,
 } from "@/persistence/drizzle/entity/council-pp.entity.ts";
 import type { DrizzleClient } from "@/persistence/drizzle/config.ts";
@@ -18,14 +18,14 @@ export class CouncilPpRepository {
     return row;
   }
 
-  async findByCouncilId(councilId: string): Promise<CouncilPp[]> {
+  findByCouncilId(councilId: string): Promise<CouncilPp[]> {
     return this.db
       .select()
       .from(councilPp)
       .where(eq(councilPp.councilId, councilId));
   }
 
-  async findActiveByCouncilId(councilId: string): Promise<CouncilPp[]> {
+  findActiveByCouncilId(councilId: string): Promise<CouncilPp[]> {
     return this.db
       .select()
       .from(councilPp)
@@ -34,7 +34,7 @@ export class CouncilPpRepository {
       );
   }
 
-  async findAll(): Promise<CouncilPp[]> {
+  findAll(): Promise<CouncilPp[]> {
     return this.db.select().from(councilPp);
   }
 

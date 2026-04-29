@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, numeric } from "drizzle-orm/pg-core";
+import { numeric, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { createBaseColumns } from "@/persistence/drizzle/entity/base.entity.ts";
 
 /**

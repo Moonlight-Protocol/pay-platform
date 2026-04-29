@@ -14,9 +14,10 @@ export type JwtPayload = {
   type?: "admin" | "provider";
 };
 
+// deno-lint-ignore require-await -- mock satisfies generateJwt's Promise<string> contract
 export default async function generateJwt(
   clientAccount: string,
-  challengeHash: string,
+  _challengeHash: string,
   opts?: { type?: "admin" | "provider" },
 ): Promise<string> {
   const typePrefix = opts?.type ?? "admin";

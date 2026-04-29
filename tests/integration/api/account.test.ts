@@ -50,7 +50,11 @@ Deno.test("POST /account - is idempotent (returns existing on second call)", asy
   await resetDb();
 
   // First create
-  const ctx1 = createMockContext({ method: "POST", body: VALID_BODY, state: { session } });
+  const ctx1 = createMockContext({
+    method: "POST",
+    body: VALID_BODY,
+    state: { session },
+  });
   await postAccountHandler(ctx1.ctx);
   assertEquals(ctx1.getResponse().status, 201);
 
@@ -131,7 +135,11 @@ Deno.test("GET /account/me - returns the authenticated wallet's account", async 
   await resetDb();
 
   // Set up an account
-  const createCtx = createMockContext({ method: "POST", body: VALID_BODY, state: { session } });
+  const createCtx = createMockContext({
+    method: "POST",
+    body: VALID_BODY,
+    state: { session },
+  });
   await postAccountHandler(createCtx.ctx);
 
   const { ctx, getResponse } = createMockContext({
@@ -163,7 +171,11 @@ Deno.test("PATCH /account/me - updates jurisdiction", async () => {
   await ensureInitialized();
   await resetDb();
 
-  const createCtx = createMockContext({ method: "POST", body: VALID_BODY, state: { session } });
+  const createCtx = createMockContext({
+    method: "POST",
+    body: VALID_BODY,
+    state: { session },
+  });
   await postAccountHandler(createCtx.ctx);
 
   const { ctx, getResponse } = createMockContext({
@@ -184,7 +196,11 @@ Deno.test("PATCH /account/me - updates email and displayName", async () => {
   await ensureInitialized();
   await resetDb();
 
-  const createCtx = createMockContext({ method: "POST", body: VALID_BODY, state: { session } });
+  const createCtx = createMockContext({
+    method: "POST",
+    body: VALID_BODY,
+    state: { session },
+  });
   await postAccountHandler(createCtx.ctx);
 
   const { ctx, getResponse } = createMockContext({
@@ -218,7 +234,11 @@ Deno.test("PATCH /account/me - rejects empty body", async () => {
   await ensureInitialized();
   await resetDb();
 
-  const createCtx = createMockContext({ method: "POST", body: VALID_BODY, state: { session } });
+  const createCtx = createMockContext({
+    method: "POST",
+    body: VALID_BODY,
+    state: { session },
+  });
   await postAccountHandler(createCtx.ctx);
 
   const { ctx, getResponse } = createMockContext({
@@ -235,7 +255,11 @@ Deno.test("PATCH /account/me - rejects invalid email", async () => {
   await ensureInitialized();
   await resetDb();
 
-  const createCtx = createMockContext({ method: "POST", body: VALID_BODY, state: { session } });
+  const createCtx = createMockContext({
+    method: "POST",
+    body: VALID_BODY,
+    state: { session },
+  });
   await postAccountHandler(createCtx.ctx);
 
   const { ctx, getResponse } = createMockContext({

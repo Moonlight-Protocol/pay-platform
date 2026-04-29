@@ -12,7 +12,9 @@
 import { Keypair } from "stellar-sdk";
 
 // Fixed test keypair — deterministic so signature outputs are reproducible.
-const walletKeypair = Keypair.fromSecret("SBPCP2AQ63VWALVCJTV63UYBFWDTQWCURW2PG74XWXGK4CFMQZIBRYK5");
+const walletKeypair = Keypair.fromSecret(
+  "SBPCP2AQ63VWALVCJTV63UYBFWDTQWCURW2PG74XWXGK4CFMQZIBRYK5",
+);
 
 export const DATABASE_URL = "mock://not-used-pglite-replaces-this";
 export const PORT = "0";

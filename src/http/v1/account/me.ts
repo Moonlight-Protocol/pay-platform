@@ -4,9 +4,9 @@ import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-accou
 import { LOG } from "@/config/logger.ts";
 import type { JwtSessionData } from "@/http/middleware/auth/index.ts";
 import {
+  validateDisplayName,
   validateEmail,
   validateJurisdiction,
-  validateDisplayName,
 } from "./helpers.ts";
 import { formatAccount } from "./post.ts";
 
@@ -81,7 +81,8 @@ export const patchMeHandler = async (ctx: Context) => {
         ctx.response.body = { message: err };
         return;
       }
-      updates.jurisdictionCountryCode = (body.jurisdictionCountryCode as string).toUpperCase();
+      updates.jurisdictionCountryCode = (body.jurisdictionCountryCode as string)
+        .toUpperCase();
     }
 
     if (body.displayName !== undefined) {
@@ -109,7 +110,10 @@ export const patchMeHandler = async (ctx: Context) => {
       return;
     }
 
-    LOG.info("Pay account updated", { walletPublicKey, fields: Object.keys(updates) });
+    LOG.info("Pay account updated", {
+      walletPublicKey,
+      fields: Object.keys(updates),
+    });
 
     ctx.response.status = Status.OK;
     ctx.response.body = {

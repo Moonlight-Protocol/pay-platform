@@ -1,15 +1,17 @@
 import { eq } from "drizzle-orm";
 import {
-  payAccount,
-  type PayAccount,
   type NewPayAccount,
+  type PayAccount,
+  payAccount,
 } from "@/persistence/drizzle/entity/pay-account.entity.ts";
 import type { DrizzleClient } from "@/persistence/drizzle/config.ts";
 
 export class PayAccountRepository {
   constructor(private readonly db: DrizzleClient) {}
 
-  async findByPublicKey(walletPublicKey: string): Promise<PayAccount | undefined> {
+  async findByPublicKey(
+    walletPublicKey: string,
+  ): Promise<PayAccount | undefined> {
     const [row] = await this.db
       .select()
       .from(payAccount)
