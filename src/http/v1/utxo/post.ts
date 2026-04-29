@@ -42,10 +42,14 @@ export const postUtxosHandler = async (ctx: Context) => {
     }
 
     for (const u of utxos) {
-      if (typeof u.utxoPublicKey !== "string" || typeof u.derivationIndex !== "number") {
+      if (
+        typeof u.utxoPublicKey !== "string" ||
+        typeof u.derivationIndex !== "number"
+      ) {
         ctx.response.status = Status.BadRequest;
         ctx.response.body = {
-          message: "Each utxo must have utxoPublicKey (string) and derivationIndex (number)",
+          message:
+            "Each utxo must have utxoPublicKey (string) and derivationIndex (number)",
         };
         return;
       }

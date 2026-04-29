@@ -37,14 +37,18 @@ export const postOpexHandler = async (ctx: Context) => {
     }
     if (typeof feePct !== "number" || feePct < 0 || feePct > 100) {
       ctx.response.status = Status.BadRequest;
-      ctx.response.body = { message: "feePct must be a number between 0 and 100" };
+      ctx.response.body = {
+        message: "feePct must be a number between 0 and 100",
+      };
       return;
     }
 
     const account = await accountRepo.findByPublicKey(walletPublicKey);
     if (!account) {
       ctx.response.status = Status.NotFound;
-      ctx.response.body = { message: "Account not found. Create an account first." };
+      ctx.response.body = {
+        message: "Account not found. Create an account first.",
+      };
       return;
     }
 
@@ -56,7 +60,11 @@ export const postOpexHandler = async (ctx: Context) => {
       feePct: String(feePct),
     });
 
-    LOG.info("OpEx account registered", { walletPublicKey, opexPublicKey: publicKey, feePct });
+    LOG.info("OpEx account registered", {
+      walletPublicKey,
+      opexPublicKey: publicKey,
+      feePct,
+    });
 
     ctx.response.status = Status.OK;
     ctx.response.body = {

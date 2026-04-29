@@ -4,9 +4,9 @@ import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-accou
 import { LOG } from "@/config/logger.ts";
 import type { JwtSessionData } from "@/http/middleware/auth/index.ts";
 import {
+  validateDisplayName,
   validateEmail,
   validateJurisdiction,
-  validateDisplayName,
 } from "./helpers.ts";
 
 const accountRepo = new PayAccountRepository(drizzleClient);
@@ -63,7 +63,8 @@ export const postAccountHandler = async (ctx: Context) => {
     const created = await accountRepo.create({
       walletPublicKey,
       email: (email as string).trim(),
-      jurisdictionCountryCode: (jurisdictionCountryCode as string).toUpperCase(),
+      jurisdictionCountryCode: (jurisdictionCountryCode as string)
+        .toUpperCase(),
       displayName: typeof displayName === "string" ? displayName.trim() : null,
       lastSeenAt: now,
       createdAt: now,

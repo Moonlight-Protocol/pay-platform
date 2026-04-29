@@ -67,7 +67,8 @@ export async function getProviderJwt(ppUrl: string): Promise<string> {
   );
   if (!challengeRes.ok) {
     throw new Error(
-      `Provider auth challenge failed: ${challengeRes.status} ${await challengeRes.text()}`,
+      `Provider auth challenge failed: ${challengeRes.status} ${await challengeRes
+        .text()}`,
     );
   }
   const { data: challengeData } = await challengeRes.json();
@@ -80,7 +81,10 @@ export async function getProviderJwt(ppUrl: string): Promise<string> {
   // The provider uses "Standalone Network ; February 2017" for local,
   // but we parse the XDR without needing the passphrase for signing —
   // we just need to add our signature to the envelope.
-  const tx = new Transaction(challengeXdr, challengeData.networkPassphrase ?? "Standalone Network ; February 2017");
+  const tx = new Transaction(
+    challengeXdr,
+    challengeData.networkPassphrase ?? "Standalone Network ; February 2017",
+  );
   tx.sign(keypair);
   const signedXdr = tx.toXDR();
 
@@ -92,7 +96,8 @@ export async function getProviderJwt(ppUrl: string): Promise<string> {
   });
   if (!verifyRes.ok) {
     throw new Error(
-      `Provider auth verify failed: ${verifyRes.status} ${await verifyRes.text()}`,
+      `Provider auth verify failed: ${verifyRes.status} ${await verifyRes
+        .text()}`,
     );
   }
   const { data: verifyData } = await verifyRes.json();

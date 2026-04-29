@@ -14,11 +14,11 @@ export type JwtPayload = {
   type?: "admin" | "provider";
 };
 
-export default async function generateJwt(
+export default function generateJwt(
   clientAccount: string,
-  challengeHash: string,
+  _challengeHash: string,
   opts?: { type?: "admin" | "provider" },
 ): Promise<string> {
   const typePrefix = opts?.type ?? "admin";
-  return `mock-jwt-${typePrefix}-${clientAccount}`;
+  return Promise.resolve(`mock-jwt-${typePrefix}-${clientAccount}`);
 }

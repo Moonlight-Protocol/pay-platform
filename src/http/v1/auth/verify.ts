@@ -19,7 +19,9 @@ export const postVerifyHandler = async (ctx: Context) => {
 
     if (!nonce || !signature || !publicKey) {
       ctx.response.status = Status.BadRequest;
-      ctx.response.body = { message: "nonce, signature, and publicKey are required" };
+      ctx.response.body = {
+        message: "nonce, signature, and publicKey are required",
+      };
       return;
     }
 

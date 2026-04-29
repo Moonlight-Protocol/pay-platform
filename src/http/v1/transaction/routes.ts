@@ -6,7 +6,11 @@ import { listTransactionsHandler } from "@/http/v1/transaction/list.ts";
 const transactionRouter = new Router();
 
 /** GET /transactions/balance — user's balance (sum of completed IN - OUT). */
-transactionRouter.get("/transactions/balance", jwtMiddleware, getBalanceHandler);
+transactionRouter.get(
+  "/transactions/balance",
+  jwtMiddleware,
+  getBalanceHandler,
+);
 
 /** GET /transactions — user's transaction history (with direction filter). */
 transactionRouter.get("/transactions", jwtMiddleware, listTransactionsHandler);

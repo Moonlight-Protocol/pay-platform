@@ -1,7 +1,7 @@
-import { eq, and } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
-  councilChannel,
   type CouncilChannel,
+  councilChannel,
   type NewCouncilChannel,
 } from "@/persistence/drizzle/entity/council-channel.entity.ts";
 import type { DrizzleClient } from "@/persistence/drizzle/config.ts";
@@ -9,14 +9,14 @@ import type { DrizzleClient } from "@/persistence/drizzle/config.ts";
 export class CouncilChannelRepository {
   constructor(private readonly db: DrizzleClient) {}
 
-  async findByCouncilId(councilId: string): Promise<CouncilChannel[]> {
+  findByCouncilId(councilId: string): Promise<CouncilChannel[]> {
     return this.db
       .select()
       .from(councilChannel)
       .where(eq(councilChannel.councilId, councilId));
   }
 
-  async findActiveByCouncilId(councilId: string): Promise<CouncilChannel[]> {
+  findActiveByCouncilId(councilId: string): Promise<CouncilChannel[]> {
     return this.db
       .select()
       .from(councilChannel)

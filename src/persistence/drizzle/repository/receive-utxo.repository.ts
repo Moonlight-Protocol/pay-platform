@@ -1,16 +1,16 @@
-import { eq, and, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
-  receiveUtxo,
   type NewReceiveUtxo,
   type ReceiveUtxo,
+  receiveUtxo,
 } from "@/persistence/drizzle/entity/receive-utxo.entity.ts";
 import type { DrizzleClient } from "@/persistence/drizzle/config.ts";
 
 export class ReceiveUtxoRepository {
   constructor(private readonly db: DrizzleClient) {}
 
-  async bulkCreate(rows: NewReceiveUtxo[]): Promise<ReceiveUtxo[]> {
-    if (rows.length === 0) return [];
+  bulkCreate(rows: NewReceiveUtxo[]): Promise<ReceiveUtxo[]> {
+    if (rows.length === 0) return Promise.resolve([]);
     return this.db.insert(receiveUtxo).values(rows).returning();
   }
 
@@ -22,7 +22,7 @@ export class ReceiveUtxoRepository {
     return row?.count ?? 0;
   }
 
-  async findAvailable(
+  findAvailable(
     walletPublicKey: string,
     limit: number,
   ): Promise<ReceiveUtxo[]> {
@@ -38,8 +38,8 @@ export class ReceiveUtxoRepository {
       .limit(limit);
   }
 
-  async findByIds(ids: string[]): Promise<ReceiveUtxo[]> {
-    if (ids.length === 0) return [];
+  findByIds(ids: string[]): Promise<ReceiveUtxo[]> {
+    if (ids.length === 0) return Promise.resolve([]);
     return this.db
       .select()
       .from(receiveUtxo)

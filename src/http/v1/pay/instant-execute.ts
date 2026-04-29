@@ -1,5 +1,11 @@
 import { type Context, Status } from "@oak/oak";
-import { Keypair, Contract, TransactionBuilder, Address, nativeToScVal } from "@stellar/stellar-sdk";
+import {
+  Address,
+  Contract,
+  Keypair,
+  nativeToScVal,
+  TransactionBuilder,
+} from "@stellar/stellar-sdk";
 import * as rpc from "@stellar/stellar-sdk/rpc";
 import { MoonlightOperation } from "@moonlight/moonlight-sdk";
 import { drizzleClient } from "@/persistence/drizzle/config.ts";
@@ -11,7 +17,11 @@ import { TransactionRepository } from "@/persistence/drizzle/repository/transact
 import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-account.repository.ts";
 import { decryptSk } from "@/core/crypto/encrypt-sk.ts";
 import { getProviderJwt } from "@/core/service/provider-auth.ts";
-import { SERVICE_AUTH_SECRET, STELLAR_NETWORK_PASSPHRASE, STELLAR_RPC_URL } from "@/config/env.ts";
+import {
+  SERVICE_AUTH_SECRET,
+  STELLAR_NETWORK_PASSPHRASE,
+  STELLAR_RPC_URL,
+} from "@/config/env.ts";
 import { LOG } from "@/config/logger.ts";
 
 const councilRepo = new CouncilRepository(drizzleClient);
@@ -56,7 +66,10 @@ export const executeInstantHandler = async (ctx: Context) => {
 
     if (!customerPaymentHash || !merchantWallet || !amountStr) {
       ctx.response.status = Status.BadRequest;
-      ctx.response.body = { message: "customerPaymentHash, merchantWallet, and amountStroops are required" };
+      ctx.response.body = {
+        message:
+          "customerPaymentHash, merchantWallet, and amountStroops are required",
+      };
       return;
     }
 
@@ -72,18 +85,29 @@ export const executeInstantHandler = async (ctx: Context) => {
     }
     if (!merchant.opexPublicKey || !merchant.encryptedOpexSk) {
       ctx.response.status = Status.UnprocessableEntity;
-      ctx.response.body = { message: "Merchant has no OpEx account configured" };
+      ctx.response.body = {
+        message: "Merchant has no OpEx account configured",
+      };
       return;
     }
     const feePct = merchant.feePct ? Number(merchant.feePct) : 0;
 
     // ─── 2. Find council + channel + PP ────────────────────
-    const councils = await councilRepo.findByJurisdiction(merchant.jurisdictionCountryCode);
+    const councils = await councilRepo.findByJurisdiction(
+      merchant.jurisdictionCountryCode,
+    );
     let selectedCouncil = null;
     let selectedChannel = null;
     for (const c of councils) {
-      const channel = await channelRepo.findByCouncilIdAndAsset(c.id, assetCode);
-      if (channel) { selectedCouncil = c; selectedChannel = channel; break; }
+      const channel = await channelRepo.findByCouncilIdAndAsset(
+        c.id,
+        assetCode,
+      );
+      if (channel) {
+        selectedCouncil = c;
+        selectedChannel = channel;
+        break;
+      }
     }
     if (!selectedCouncil || !selectedChannel) {
       ctx.response.status = Status.ServiceUnavailable;
@@ -106,7 +130,9 @@ export const executeInstantHandler = async (ctx: Context) => {
       ? STELLAR_RPC_URL.replace("/soroban/rpc", "")
       : STELLAR_RPC_URL;
 
-    const txRes = await fetch(`${horizonUrl}/transactions/${customerPaymentHash}/operations`);
+    const txRes = await fetch(
+      `${horizonUrl}/transactions/${customerPaymentHash}/operations`,
+    );
     if (!txRes.ok) {
       ctx.response.status = Status.BadRequest;
       ctx.response.body = { message: "Customer payment not found on-chain" };
@@ -115,13 +141,23 @@ export const executeInstantHandler = async (ctx: Context) => {
     }
     const txOps = await txRes.json();
     const paymentOp = txOps._embedded?.records?.find(
-      (op: { type: string; to?: string; amount?: string; funder?: string; account?: string }) =>
+      (
+        op: {
+          type: string;
+          to?: string;
+          amount?: string;
+          funder?: string;
+          account?: string;
+        },
+      ) =>
         (op.type === "payment" && op.to === merchant.opexPublicKey) ||
         (op.type === "create_account" && op.account === merchant.opexPublicKey),
     );
     if (!paymentOp) {
       ctx.response.status = Status.BadRequest;
-      ctx.response.body = { message: "No payment to OpEx address found in transaction" };
+      ctx.response.body = {
+        message: "No payment to OpEx address found in transaction",
+      };
       if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
       return;
     }
@@ -129,17 +165,24 @@ export const executeInstantHandler = async (ctx: Context) => {
     const paidStroops = BigInt(Math.round(parseFloat(paidAmount) * 1e7));
     if (paidStroops < amountStroops) {
       ctx.response.status = Status.BadRequest;
-      ctx.response.body = { message: `Insufficient payment: expected ${amountStroops}, got ${paidStroops}` };
+      ctx.response.body = {
+        message:
+          `Insufficient payment: expected ${amountStroops}, got ${paidStroops}`,
+      };
       if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
       return;
     }
 
     // ─── 4. Calculate net amount ───────────────────────────
-    const feeStroops = amountStroops * BigInt(Math.round(feePct * 100)) / 10000n;
+    const feeStroops = amountStroops * BigInt(Math.round(feePct * 100)) /
+      10000n;
     const netStroops = amountStroops - feeStroops;
 
     // ─── 5. Decrypt OpEx SK and deposit into channel ───────
-    const opexSk = await decryptSk(merchant.encryptedOpexSk, SERVICE_AUTH_SECRET);
+    const opexSk = await decryptSk(
+      merchant.encryptedOpexSk,
+      SERVICE_AUTH_SECRET,
+    );
     const opexKeypair = Keypair.fromSecret(opexSk);
     const networkPassphrase = STELLAR_NETWORK_PASSPHRASE;
 
@@ -176,7 +219,9 @@ export const executeInstantHandler = async (ctx: Context) => {
     while (Date.now() < deadline) {
       const status = await server.getTransaction(depositResult.hash);
       if (status.status === "SUCCESS") break;
-      if (status.status === "FAILED") throw new Error("Deposit transaction failed on-chain");
+      if (status.status === "FAILED") {
+        throw new Error("Deposit transaction failed on-chain");
+      }
       await new Promise((r) => setTimeout(r, 2000));
     }
 
@@ -196,7 +241,9 @@ export const executeInstantHandler = async (ctx: Context) => {
     );
 
     const tempCount = merchantUtxos.length;
-    const tempKeypairs: Array<{ publicKey: Uint8Array; privateKey: Uint8Array }> = [];
+    const tempKeypairs: Array<
+      { publicKey: Uint8Array; privateKey: Uint8Array }
+    > = [];
     for (let i = 0; i < tempCount; i++) {
       const seed = crypto.getRandomValues(new Uint8Array(32));
       tempKeypairs.push(await deriveP256Keypair(seed));
@@ -273,9 +320,14 @@ export const executeInstantHandler = async (ctx: Context) => {
 
     if (!bundleRes.ok) {
       const errBody = await bundleRes.text().catch(() => "");
-      LOG.error("Provider bundle submission failed", { status: bundleRes.status, body: errBody });
+      LOG.error("Provider bundle submission failed", {
+        status: bundleRes.status,
+        body: errBody,
+      });
       ctx.response.status = Status.BadGateway;
-      ctx.response.body = { message: "Payment processing failed — provider rejected the bundle" };
+      ctx.response.body = {
+        message: "Payment processing failed — provider rejected the bundle",
+      };
       if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
       return;
     }
@@ -324,7 +376,9 @@ export const executeInstantHandler = async (ctx: Context) => {
     ctx.response.status = Status.InternalServerError;
     ctx.response.body = { message: "Failed to process payment" };
     if (merchantUtxoIds) {
-      try { await utxoRepo.release(merchantUtxoIds); } catch { /* best effort */ }
+      try {
+        await utxoRepo.release(merchantUtxoIds);
+      } catch { /* best effort */ }
     }
   }
 };
@@ -338,7 +392,8 @@ function partitionAmount(total: bigint, parts: number): bigint[] {
   let remaining = total;
   for (let i = 0; i < parts - 1; i++) {
     const maxForThis = remaining - BigInt(parts - i - 1);
-    const portion = 1n + BigInt(Math.floor(Math.random() * Number(maxForThis - 1n)));
+    const portion = 1n +
+      BigInt(Math.floor(Math.random() * Number(maxForThis - 1n)));
     result.push(portion);
     remaining -= portion;
   }
@@ -346,28 +401,74 @@ function partitionAmount(total: bigint, parts: number): bigint[] {
   return result;
 }
 
-async function deriveP256Keypair(seed: Uint8Array): Promise<{ publicKey: Uint8Array; privateKey: Uint8Array }> {
+async function deriveP256Keypair(
+  seed: Uint8Array,
+): Promise<{ publicKey: Uint8Array; privateKey: Uint8Array }> {
   const seedBuf = new ArrayBuffer(seed.length);
   new Uint8Array(seedBuf).set(seed);
-  const expandKey = await crypto.subtle.importKey("raw", seedBuf, "HKDF", false, ["deriveBits"]);
+  const expandKey = await crypto.subtle.importKey(
+    "raw",
+    seedBuf,
+    "HKDF",
+    false,
+    ["deriveBits"],
+  );
   const expanded = await crypto.subtle.deriveBits(
-    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: new TextEncoder().encode("moonlight-p256") },
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new Uint8Array(0),
+      info: new TextEncoder().encode("moonlight-p256"),
+    },
     expandKey,
     384,
   );
   const privateKeyBytes = new Uint8Array(expanded).slice(0, 32);
 
   const { p256 } = await import("@noble/curves/p256");
-  const publicKey = p256.ProjectivePoint.fromPrivateKey(privateKeyBytes).toRawBytes(false);
+  const publicKey = p256.ProjectivePoint.fromPrivateKey(privateKeyBytes)
+    .toRawBytes(false);
 
   return { publicKey: new Uint8Array(publicKey), privateKey: privateKeyBytes };
 }
 
 function buildPkcs8P256(rawPrivateKey: Uint8Array): ArrayBuffer {
   const header = new Uint8Array([
-    0x30, 0x41, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48,
-    0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03,
-    0x01, 0x07, 0x04, 0x27, 0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20,
+    0x30,
+    0x41,
+    0x02,
+    0x01,
+    0x00,
+    0x30,
+    0x13,
+    0x06,
+    0x07,
+    0x2a,
+    0x86,
+    0x48,
+    0xce,
+    0x3d,
+    0x02,
+    0x01,
+    0x06,
+    0x08,
+    0x2a,
+    0x86,
+    0x48,
+    0xce,
+    0x3d,
+    0x03,
+    0x01,
+    0x07,
+    0x04,
+    0x27,
+    0x30,
+    0x25,
+    0x02,
+    0x01,
+    0x01,
+    0x04,
+    0x20,
   ]);
   const result = new Uint8Array(header.length + 32);
   result.set(header);

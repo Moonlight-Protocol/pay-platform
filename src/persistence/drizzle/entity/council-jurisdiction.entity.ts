@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { council } from "@/persistence/drizzle/entity/council.entity.ts";
 
 /**
@@ -14,7 +14,8 @@ export const councilJurisdiction = pgTable("council_jurisdictions", {
     .notNull()
     .references(() => council.id, { onDelete: "cascade" }),
   countryCode: text("country_code").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull()
+    .defaultNow(),
 });
 
 export type CouncilJurisdiction = typeof councilJurisdiction.$inferSelect;

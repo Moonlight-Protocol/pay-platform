@@ -105,7 +105,8 @@ export const prepareInstantHandler = async (ctx: Context) => {
     if (!selectedCouncil || !selectedChannel) {
       ctx.response.status = Status.ServiceUnavailable;
       ctx.response.body = {
-        message: `No ${assetCode} channel available in any council for this jurisdiction`,
+        message:
+          `No ${assetCode} channel available in any council for this jurisdiction`,
       };
       return;
     }

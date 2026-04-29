@@ -21,7 +21,7 @@ export const getBalanceHandler = async (ctx: Context) => {
         balanceXlm: (Number(balanceStroops) / 1e7).toFixed(7),
       },
     };
-  } catch (error) {
+  } catch {
     ctx.response.status = Status.InternalServerError;
     ctx.response.body = { message: "Failed to get balance" };
   }

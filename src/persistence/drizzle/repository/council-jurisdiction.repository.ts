@@ -1,7 +1,7 @@
-import { eq, and } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
-  councilJurisdiction,
   type CouncilJurisdiction,
+  councilJurisdiction,
   type NewCouncilJurisdiction,
 } from "@/persistence/drizzle/entity/council-jurisdiction.entity.ts";
 import type { DrizzleClient } from "@/persistence/drizzle/config.ts";
@@ -9,7 +9,7 @@ import type { DrizzleClient } from "@/persistence/drizzle/config.ts";
 export class CouncilJurisdictionRepository {
   constructor(private readonly db: DrizzleClient) {}
 
-  async findByCouncilId(councilId: string): Promise<CouncilJurisdiction[]> {
+  findByCouncilId(councilId: string): Promise<CouncilJurisdiction[]> {
     return this.db
       .select()
       .from(councilJurisdiction)
@@ -24,10 +24,10 @@ export class CouncilJurisdictionRepository {
     return row;
   }
 
-  async bulkCreate(
+  bulkCreate(
     rows: NewCouncilJurisdiction[],
   ): Promise<CouncilJurisdiction[]> {
-    if (rows.length === 0) return [];
+    if (rows.length === 0) return Promise.resolve([]);
     return this.db
       .insert(councilJurisdiction)
       .values(rows)
