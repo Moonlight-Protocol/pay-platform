@@ -1,7 +1,7 @@
-import { eq, and, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
-  council,
   type Council,
+  council,
   type NewCouncil,
 } from "@/persistence/drizzle/entity/council.entity.ts";
 import { councilJurisdiction } from "@/persistence/drizzle/entity/council-jurisdiction.entity.ts";
@@ -19,11 +19,11 @@ export class CouncilRepository {
     return row;
   }
 
-  async findAll(): Promise<Council[]> {
+  findAll(): Promise<Council[]> {
     return this.db.select().from(council);
   }
 
-  async findActive(): Promise<Council[]> {
+  findActive(): Promise<Council[]> {
     return this.db
       .select()
       .from(council)
@@ -33,7 +33,7 @@ export class CouncilRepository {
   /**
    * Find active councils that serve BOTH the payer and receiver jurisdictions.
    */
-  async findByJurisdictionPair(
+  findByJurisdictionPair(
     payerCode: string,
     receiverCode: string,
   ): Promise<Council[]> {
@@ -52,7 +52,7 @@ export class CouncilRepository {
   /**
    * Find active councils that serve a given jurisdiction.
    */
-  async findByJurisdiction(countryCode: string): Promise<Council[]> {
+  findByJurisdiction(countryCode: string): Promise<Council[]> {
     return this.db
       .selectDistinct()
       .from(council)

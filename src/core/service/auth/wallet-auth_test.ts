@@ -46,7 +46,12 @@ Deno.test("verifyWalletChallenge rejects an unknown nonce", async () => {
   const kp = Keypair.random();
   await assertRejects(
     () =>
-      verifyWalletChallenge("never-issued", "irrelevant", kp.publicKey(), config),
+      verifyWalletChallenge(
+        "never-issued",
+        "irrelevant",
+        kp.publicKey(),
+        config,
+      ),
     Error,
     "Challenge not found or expired",
   );

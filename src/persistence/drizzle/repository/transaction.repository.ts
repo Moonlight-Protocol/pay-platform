@@ -1,8 +1,8 @@
-import { eq, desc, and, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import {
-  transaction,
   type NewTransaction,
   type Transaction,
+  transaction,
 } from "@/persistence/drizzle/entity/transaction.entity.ts";
 import type { DrizzleClient } from "@/persistence/drizzle/config.ts";
 
@@ -23,7 +23,7 @@ export class TransactionRepository {
     return row;
   }
 
-  async findByWallet(
+  findByWallet(
     walletPublicKey: string,
     opts?: { direction?: "IN" | "OUT"; limit?: number; offset?: number },
   ): Promise<Transaction[]> {
@@ -61,7 +61,10 @@ export class TransactionRepository {
     status: "PENDING" | "COMPLETED" | "FAILED",
     bundleId?: string,
   ): Promise<Transaction | undefined> {
-    const updates: Partial<NewTransaction> & { updatedAt: Date; completedAt?: Date } = {
+    const updates: Partial<NewTransaction> & {
+      updatedAt: Date;
+      completedAt?: Date;
+    } = {
       status,
       updatedAt: new Date(),
     };

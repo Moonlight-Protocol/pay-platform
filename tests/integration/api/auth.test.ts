@@ -22,12 +22,17 @@ async function getNonce(publicKey: string): Promise<string> {
   return res.body.data.nonce as string;
 }
 
-function signNonceSep53(nonce: string): string {
+function _signNonceSep53(nonce: string): string {
   const nonceBytes = Buffer.from(nonce, "utf-8");
   const sep53Prefix = "Stellar Signed Message:\n";
-  const sep53Payload = Buffer.concat([Buffer.from(sep53Prefix, "utf-8"), nonceBytes]);
+  const sep53Payload = Buffer.concat([
+    Buffer.from(sep53Prefix, "utf-8"),
+    nonceBytes,
+  ]);
   return Promise.resolve().then(async () => {
-    const hash = Buffer.from(await crypto.subtle.digest("SHA-256", sep53Payload));
+    const hash = Buffer.from(
+      await crypto.subtle.digest("SHA-256", sep53Payload),
+    );
     return _TEST_WALLET_KEYPAIR.sign(hash).toString("base64");
   }) as unknown as string;
 }
@@ -35,7 +40,10 @@ function signNonceSep53(nonce: string): string {
 async function signSep53(nonce: string): Promise<string> {
   const nonceBytes = Buffer.from(nonce, "utf-8");
   const sep53Prefix = "Stellar Signed Message:\n";
-  const sep53Payload = Buffer.concat([Buffer.from(sep53Prefix, "utf-8"), nonceBytes]);
+  const sep53Payload = Buffer.concat([
+    Buffer.from(sep53Prefix, "utf-8"),
+    nonceBytes,
+  ]);
   const hash = Buffer.from(await crypto.subtle.digest("SHA-256", sep53Payload));
   return _TEST_WALLET_KEYPAIR.sign(hash).toString("base64");
 }

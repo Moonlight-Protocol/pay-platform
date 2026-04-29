@@ -22,7 +22,10 @@ export const listTransactionsHandler = async (ctx: Context) => {
     const session = ctx.state.session as JwtSessionData;
     const params = ctx.request.url.searchParams;
     const direction = params.get("direction") as "IN" | "OUT" | null;
-    const limit = Math.min(parseInt(params.get("limit") ?? "50", 10) || 50, 100);
+    const limit = Math.min(
+      parseInt(params.get("limit") ?? "50", 10) || 50,
+      100,
+    );
     const offset = parseInt(params.get("offset") ?? "0", 10) || 0;
 
     const rows = await txRepo.findByWallet(session.sub, {
@@ -46,7 +49,7 @@ export const listTransactionsHandler = async (ctx: Context) => {
         completedAt: tx.completedAt?.toISOString() ?? null,
       })),
     };
-  } catch (error) {
+  } catch (_error) {
     ctx.response.status = Status.InternalServerError;
     ctx.response.body = { message: "Failed to list transactions" };
   }

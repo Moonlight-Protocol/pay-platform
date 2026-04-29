@@ -1,4 +1,4 @@
-import { pgEnum, pgTable, text, uuid, integer } from "drizzle-orm/pg-core";
+import { integer, pgEnum, pgTable, text, uuid } from "drizzle-orm/pg-core";
 import { createBaseColumns } from "@/persistence/drizzle/entity/base.entity.ts";
 import { payAccount } from "@/persistence/drizzle/entity/pay-account.entity.ts";
 

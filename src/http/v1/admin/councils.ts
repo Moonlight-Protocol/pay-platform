@@ -61,7 +61,9 @@ export const createCouncil = async (ctx: Context) => {
     // Create channels if provided
     if (Array.isArray(channels) && channels.length > 0) {
       for (const ch of channels) {
-        if (!ch.assetCode || !ch.assetContractId || !ch.privacyChannelId) continue;
+        if (!ch.assetCode || !ch.assetContractId || !ch.privacyChannelId) {
+          continue;
+        }
         await channelRepo.create({
           councilId: row.id,
           assetCode: ch.assetCode,
@@ -76,19 +78,27 @@ export const createCouncil = async (ctx: Context) => {
     if (Array.isArray(jurisdictions) && jurisdictions.length > 0) {
       await jurisdictionRepo.bulkCreate(
         jurisdictions
-          .filter((code: unknown) => typeof code === "string" && code.length > 0)
-          .map((code: string) => ({ councilId: row.id, countryCode: code.trim() })),
+          .filter((code: unknown) =>
+            typeof code === "string" && code.length > 0
+          )
+          .map((code: string) => ({
+            councilId: row.id,
+            countryCode: code.trim(),
+          })),
       );
     }
 
     // Create privacy providers if discovered from council-platform
-    const providers: unknown[] = Array.isArray(body.providers) ? body.providers : [];
+    const providers: unknown[] = Array.isArray(body.providers)
+      ? body.providers
+      : [];
     for (const pp of providers) {
       const p = pp as Record<string, unknown>;
       if (!p.publicKey || !p.providerUrl) continue;
       await ppRepo.create({
         councilId: row.id,
-        name: (typeof p.label === "string" && p.label) || String(p.publicKey).substring(0, 8),
+        name: (typeof p.label === "string" && p.label) ||
+          String(p.publicKey).substring(0, 8),
         url: String(p.providerUrl),
         publicKey: String(p.publicKey),
         active: true,
@@ -99,7 +109,9 @@ export const createCouncil = async (ctx: Context) => {
     ctx.response.status = Status.Created;
     ctx.response.body = { data: row };
   } catch (error) {
-    LOG.error("Failed to create council", { error: error instanceof Error ? error.message : String(error) });
+    LOG.error("Failed to create council", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     ctx.response.status = Status.InternalServerError;
     ctx.response.body = { message: "Failed to create council" };
   }
@@ -109,7 +121,7 @@ export const updateCouncil = async (ctx: RouterContext<string>) => {
   const id = ctx.params.id;
   try {
     const body = await ctx.request.body.json();
-    const { channels, jurisdictions, ...councilFields } = body;
+    const { channels: _channels, jurisdictions, ...councilFields } = body;
 
     const row = await councilRepo.update(id, councilFields);
     if (!row) {
@@ -124,15 +136,22 @@ export const updateCouncil = async (ctx: RouterContext<string>) => {
       if (jurisdictions.length > 0) {
         await jurisdictionRepo.bulkCreate(
           jurisdictions
-            .filter((code: unknown) => typeof code === "string" && code.length > 0)
-            .map((code: string) => ({ councilId: id, countryCode: code.trim() })),
+            .filter((code: unknown) =>
+              typeof code === "string" && code.length > 0
+            )
+            .map((code: string) => ({
+              councilId: id,
+              countryCode: code.trim(),
+            })),
         );
       }
     }
 
     ctx.response.body = { data: row };
   } catch (error) {
-    LOG.error("Failed to update council", { error: error instanceof Error ? error.message : String(error) });
+    LOG.error("Failed to update council", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     ctx.response.status = Status.InternalServerError;
     ctx.response.body = { message: "Failed to update council" };
   }
@@ -185,7 +204,9 @@ export const discoverCouncil = async (ctx: Context) => {
     const res = await fetch(`${baseUrl}/api/v1/public/council${qs}`);
     if (!res.ok) {
       ctx.response.status = res.status;
-      ctx.response.body = { message: `Council platform returned ${res.status}` };
+      ctx.response.body = {
+        message: `Council platform returned ${res.status}`,
+      };
       return;
     }
 
@@ -229,7 +250,10 @@ export const createCouncilChannel = async (ctx: RouterContext<string>) => {
 
     if (!assetCode || !assetContractId || !privacyChannelId) {
       ctx.response.status = Status.BadRequest;
-      ctx.response.body = { message: "assetCode, assetContractId, and privacyChannelId are required" };
+      ctx.response.body = {
+        message:
+          "assetCode, assetContractId, and privacyChannelId are required",
+      };
       return;
     }
 
@@ -244,7 +268,9 @@ export const createCouncilChannel = async (ctx: RouterContext<string>) => {
     ctx.response.status = Status.Created;
     ctx.response.body = { data: row };
   } catch (error) {
-    LOG.error("Failed to create council channel", { error: error instanceof Error ? error.message : String(error) });
+    LOG.error("Failed to create council channel", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     ctx.response.status = Status.InternalServerError;
     ctx.response.body = { message: "Failed to create channel" };
   }
@@ -305,7 +331,9 @@ export const createCouncilPp = async (ctx: RouterContext<string>) => {
     ctx.response.status = Status.Created;
     ctx.response.body = { data: row };
   } catch (error) {
-    LOG.error("Failed to create council PP", { error: error instanceof Error ? error.message : String(error) });
+    LOG.error("Failed to create council PP", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     ctx.response.status = Status.InternalServerError;
     ctx.response.body = { message: "Failed to create PP" };
   }
@@ -323,7 +351,9 @@ export const updateCouncilPp = async (ctx: RouterContext<string>) => {
     }
     ctx.response.body = { data: row };
   } catch (error) {
-    LOG.error("Failed to update PP", { error: error instanceof Error ? error.message : String(error) });
+    LOG.error("Failed to update PP", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     ctx.response.status = Status.InternalServerError;
     ctx.response.body = { message: "Failed to update PP" };
   }

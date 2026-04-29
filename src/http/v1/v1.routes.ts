@@ -12,11 +12,23 @@ const apiRouter = new Router();
 
 apiRouter.use("/api/v1", healthRouter.routes(), healthRouter.allowedMethods());
 apiRouter.use("/api/v1", authRouter.routes(), authRouter.allowedMethods());
-apiRouter.use("/api/v1", accountRouter.routes(), accountRouter.allowedMethods());
+apiRouter.use(
+  "/api/v1",
+  accountRouter.routes(),
+  accountRouter.allowedMethods(),
+);
 apiRouter.use("/api/v1", adminRouter.routes(), adminRouter.allowedMethods());
 apiRouter.use("/api/v1", utxoRouter.routes(), utxoRouter.allowedMethods());
-apiRouter.use("/api/v1", transactionRouter.routes(), transactionRouter.allowedMethods());
+apiRouter.use(
+  "/api/v1",
+  transactionRouter.routes(),
+  transactionRouter.allowedMethods(),
+);
 apiRouter.use("/api/v1", payRouter.routes(), payRouter.allowedMethods());
-apiRouter.use("/api/v1", waitlistRouter.routes(), waitlistRouter.allowedMethods());
+apiRouter.use(
+  "/api/v1",
+  waitlistRouter.routes(),
+  waitlistRouter.allowedMethods(),
+);
 
 export default apiRouter;

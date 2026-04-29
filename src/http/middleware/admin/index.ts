@@ -1,5 +1,8 @@
 import type { Context } from "@oak/oak";
-import { jwtMiddleware, type JwtSessionData } from "@/http/middleware/auth/index.ts";
+import {
+  jwtMiddleware,
+  type JwtSessionData,
+} from "@/http/middleware/auth/index.ts";
 import { LOG } from "@/config/logger.ts";
 import { loadOptionalEnv } from "@/utils/env/loadEnv.ts";
 import { MODE } from "@/config/env.ts";

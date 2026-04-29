@@ -32,7 +32,10 @@ adminRouter.delete("/councils/:id", deleteCouncil);
 // Council Channels (nested under council)
 adminRouter.get("/councils/:councilId/channels", listCouncilChannels);
 adminRouter.post("/councils/:councilId/channels", createCouncilChannel);
-adminRouter.delete("/councils/:councilId/channels/:channelId", deleteCouncilChannel);
+adminRouter.delete(
+  "/councils/:councilId/channels/:channelId",
+  deleteCouncilChannel,
+);
 
 // Council PPs (nested under council)
 adminRouter.get("/councils/:councilId/pps", listCouncilPps);

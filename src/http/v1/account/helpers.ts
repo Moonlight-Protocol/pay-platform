@@ -17,20 +17,28 @@ const MAX_DISPLAY_NAME_LENGTH = 100;
 export function validateEmail(value: unknown): string | null {
   if (typeof value !== "string") return "email must be a string";
   if (value.length === 0) return "email is required";
-  if (value.length > MAX_EMAIL_LENGTH) return `email must be at most ${MAX_EMAIL_LENGTH} characters`;
+  if (value.length > MAX_EMAIL_LENGTH) {
+    return `email must be at most ${MAX_EMAIL_LENGTH} characters`;
+  }
   if (!EMAIL_RE.test(value)) return "email is not a valid format";
   return null;
 }
 
 export function validateJurisdiction(value: unknown): string | null {
-  if (typeof value !== "string") return "jurisdictionCountryCode must be a string";
-  if (!COUNTRY_CODE_RE.test(value)) return "jurisdictionCountryCode must be an ISO 3166-1 alpha-2 code (e.g. ES, AR, US)";
+  if (typeof value !== "string") {
+    return "jurisdictionCountryCode must be a string";
+  }
+  if (!COUNTRY_CODE_RE.test(value)) {
+    return "jurisdictionCountryCode must be an ISO 3166-1 alpha-2 code (e.g. ES, AR, US)";
+  }
   return null;
 }
 
 export function validateDisplayName(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== "string") return "displayName must be a string";
-  if (value.length > MAX_DISPLAY_NAME_LENGTH) return `displayName must be at most ${MAX_DISPLAY_NAME_LENGTH} characters`;
+  if (value.length > MAX_DISPLAY_NAME_LENGTH) {
+    return `displayName must be at most ${MAX_DISPLAY_NAME_LENGTH} characters`;
+  }
   return null;
 }
