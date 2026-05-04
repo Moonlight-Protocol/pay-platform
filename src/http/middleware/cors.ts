@@ -1,7 +1,8 @@
 import type { Context, Next } from "@oak/oak";
 import { MODE } from "@/config/env.ts";
+import { loadOptionalEnv } from "@/utils/env/loadEnv.ts";
 
-const envOrigins = Deno.env.get("ALLOWED_ORIGINS");
+const envOrigins = loadOptionalEnv("ALLOWED_ORIGINS");
 const ALLOWED_ORIGINS = envOrigins
   ? envOrigins.split(",").map((o) => o.trim()).filter(Boolean)
   : [];
@@ -22,7 +23,7 @@ function setCorsHeaders(ctx: Context, origin: string) {
   );
   ctx.response.headers.set(
     "Access-Control-Allow-Headers",
-    MODE === "development" ? "*" : "Content-Type, Authorization",
+    "Authorization, *",
   );
   ctx.response.headers.set("Access-Control-Max-Age", "86400");
 }
