@@ -84,7 +84,7 @@ export { ensureInitialized };
 /** Truncate all tables. Call between tests for a clean slate. */
 export async function resetDb(): Promise<void> {
   await ensureInitialized();
-  await pg.exec(`TRUNCATE TABLE pay_accounts CASCADE;`);
+  await pg.exec(`TRUNCATE TABLE pay_accounts, waitlist_requests CASCADE;`);
 }
 
 /** Shut down PGlite. Call after all tests are done. */
