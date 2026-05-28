@@ -319,17 +319,20 @@ export const executeInstantHandler = (ctx: Context) =>
 
       // ─── 7. Submit bundle to provider-platform ─────────────
       const providerJwt = await getProviderJwt(pp.url);
-      const bundleRes = await fetch(`${pp.url}/api/v1/bundle`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${providerJwt}`,
+      const bundleRes = await fetch(
+        `${pp.url}/api/v1/providers/${pp.publicKey}/bundles`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${providerJwt}`,
+          },
+          body: JSON.stringify({
+            operationsMLXDR,
+            channelContractId: selectedChannel.privacyChannelId,
+          }),
         },
-        body: JSON.stringify({
-          operationsMLXDR,
-          channelContractId: selectedChannel.privacyChannelId,
-        }),
-      });
+      );
 
       if (!bundleRes.ok) {
         const errBody = await bundleRes.text().catch(() => "");
