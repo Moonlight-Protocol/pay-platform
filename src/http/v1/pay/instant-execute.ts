@@ -22,7 +22,7 @@ import {
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
 } from "@/config/env.ts";
-import { LOG } from "@/config/logger.ts";
+import type { Logger } from "@/utils/logger/index.ts";
 import { withSpan } from "@/core/tracing.ts";
 
 const councilRepo = new CouncilRepository(drizzleClient);
@@ -51,354 +51,374 @@ const accountRepo = new PayAccountRepository(drizzleClient);
  *   merchantUtxoIds     — reserved UTXO IDs from prepare
  * }
  */
-export const executeInstantHandler = (ctx: Context) =>
-  withSpan("P_ExecuteInstant", async (span) => {
-    let merchantUtxoIds: string[] | undefined;
+export function handleExecuteInstant(
+  deps: { log: Logger },
+): (ctx: Context) => Promise<void> {
+  const log = deps.log.scope("executeInstant");
 
-    try {
-      const body = await ctx.request.body.json().catch(() => ({}));
-      const {
-        customerPaymentHash,
-        merchantWallet,
-        amountStroops: amountStr,
-        assetCode: requestedAsset,
-        description,
-      } = body;
-      merchantUtxoIds = body.merchantUtxoIds;
+  return (ctx) =>
+    withSpan("P_ExecuteInstant", async (span) => {
+      log.info("executeInstant");
+      let merchantUtxoIds: string[] | undefined;
 
-      if (!customerPaymentHash || !merchantWallet || !amountStr) {
-        ctx.response.status = Status.BadRequest;
-        ctx.response.body = {
-          message:
-            "customerPaymentHash, merchantWallet, and amountStroops are required",
-        };
-        return;
-      }
+      try {
+        const body = await ctx.request.body.json().catch(() => ({}));
+        const {
+          customerPaymentHash,
+          merchantWallet,
+          amountStroops: amountStr,
+          assetCode: requestedAsset,
+          description,
+        } = body;
+        merchantUtxoIds = body.merchantUtxoIds;
 
-      const assetCode = requestedAsset || "XLM";
-      const amountStroops = BigInt(amountStr);
-      span.setAttribute("merchant.public_key", merchantWallet);
-      span.setAttribute("asset.code", assetCode);
-      span.setAttribute("amount.stroops", amountStroops.toString());
-      span.setAttribute("customer.payment_hash", customerPaymentHash);
+        if (!customerPaymentHash || !merchantWallet || !amountStr) {
+          ctx.response.status = Status.BadRequest;
+          ctx.response.body = {
+            message:
+              "customerPaymentHash, merchantWallet, and amountStroops are required",
+          };
+          return;
+        }
 
-      // ─── 1. Look up merchant and OpEx ──────────────────────
-      const merchant = await accountRepo.findByPublicKey(merchantWallet);
-      if (!merchant) {
-        ctx.response.status = Status.NotFound;
-        ctx.response.body = { message: "Merchant not found" };
-        return;
-      }
-      if (!merchant.opexPublicKey || !merchant.encryptedOpexSk) {
-        ctx.response.status = Status.UnprocessableEntity;
-        ctx.response.body = {
-          message: "Merchant has no OpEx account configured",
-        };
-        return;
-      }
-      const feePct = merchant.feePct ? Number(merchant.feePct) : 0;
+        const assetCode = requestedAsset || "XLM";
+        const amountStroops = BigInt(amountStr);
+        span.setAttribute("merchant.public_key", merchantWallet);
+        span.setAttribute("asset.code", assetCode);
+        span.setAttribute("amount.stroops", amountStroops.toString());
+        span.setAttribute("customer.payment_hash", customerPaymentHash);
 
-      // ─── 2. Find council + channel + PP ────────────────────
-      const councils = await councilRepo.findByJurisdiction(
-        merchant.jurisdictionCountryCode,
-      );
-      let selectedCouncil = null;
-      let selectedChannel = null;
-      for (const c of councils) {
-        const channel = await channelRepo.findByCouncilIdAndAsset(
-          c.id,
-          assetCode,
+        log.debug("merchantWallet", merchantWallet);
+        log.debug("assetCode", assetCode);
+        log.debug("amountStroops", amountStroops.toString());
+        log.debug("customerPaymentHash", customerPaymentHash);
+
+        // ─── 1. Look up merchant and OpEx ──────────────────────
+        const merchant = await accountRepo.findByPublicKey(merchantWallet);
+        if (!merchant) {
+          ctx.response.status = Status.NotFound;
+          ctx.response.body = { message: "Merchant not found" };
+          return;
+        }
+        if (!merchant.opexPublicKey || !merchant.encryptedOpexSk) {
+          ctx.response.status = Status.UnprocessableEntity;
+          ctx.response.body = {
+            message: "Merchant has no OpEx account configured",
+          };
+          return;
+        }
+        const feePct = merchant.feePct ? Number(merchant.feePct) : 0;
+
+        // ─── 2. Find council + channel + PP ────────────────────
+        const councils = await councilRepo.findByJurisdiction(
+          merchant.jurisdictionCountryCode,
         );
-        if (channel) {
-          selectedCouncil = c;
-          selectedChannel = channel;
-          break;
+        let selectedCouncil = null;
+        let selectedChannel = null;
+        for (const c of councils) {
+          const channel = await channelRepo.findByCouncilIdAndAsset(
+            c.id,
+            assetCode,
+          );
+          if (channel) {
+            selectedCouncil = c;
+            selectedChannel = channel;
+            break;
+          }
         }
-      }
-      if (!selectedCouncil || !selectedChannel) {
-        ctx.response.status = Status.ServiceUnavailable;
-        ctx.response.body = { message: `No ${assetCode} channel available` };
-        if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
-        return;
-      }
-      span.setAttribute("council.id", selectedCouncil.id);
-      span.setAttribute("channel.id", selectedChannel.id);
-
-      const pps = await ppRepo.findActiveByCouncilId(selectedCouncil.id);
-      if (pps.length === 0) {
-        ctx.response.status = Status.ServiceUnavailable;
-        ctx.response.body = { message: "No privacy provider available" };
-        if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
-        return;
-      }
-      const pp = pps[Math.floor(Math.random() * pps.length)];
-      span.setAttribute("pp.id", pp.id);
-
-      // ─── 3. Verify customer payment on-chain ───────────────
-      const horizonUrl = STELLAR_RPC_URL.includes("/soroban/rpc")
-        ? STELLAR_RPC_URL.replace("/soroban/rpc", "")
-        : STELLAR_RPC_URL;
-
-      const txRes = await fetch(
-        `${horizonUrl}/transactions/${customerPaymentHash}/operations`,
-      );
-      if (!txRes.ok) {
-        ctx.response.status = Status.BadRequest;
-        ctx.response.body = { message: "Customer payment not found on-chain" };
-        if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
-        return;
-      }
-      const txOps = await txRes.json();
-      const paymentOp = txOps._embedded?.records?.find(
-        (
-          op: {
-            type: string;
-            to?: string;
-            amount?: string;
-            funder?: string;
-            account?: string;
-          },
-        ) =>
-          (op.type === "payment" && op.to === merchant.opexPublicKey) ||
-          (op.type === "create_account" &&
-            op.account === merchant.opexPublicKey),
-      );
-      if (!paymentOp) {
-        ctx.response.status = Status.BadRequest;
-        ctx.response.body = {
-          message: "No payment to OpEx address found in transaction",
-        };
-        if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
-        return;
-      }
-      const paidAmount = paymentOp.amount ?? paymentOp.starting_balance ?? "0";
-      const paidStroops = BigInt(Math.round(parseFloat(paidAmount) * 1e7));
-      if (paidStroops < amountStroops) {
-        ctx.response.status = Status.BadRequest;
-        ctx.response.body = {
-          message:
-            `Insufficient payment: expected ${amountStroops}, got ${paidStroops}`,
-        };
-        if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
-        return;
-      }
-
-      // ─── 4. Calculate net amount ───────────────────────────
-      const feeStroops = amountStroops * BigInt(Math.round(feePct * 100)) /
-        10000n;
-      const netStroops = amountStroops - feeStroops;
-      span.setAttribute("net.stroops", netStroops.toString());
-      span.setAttribute("fee.stroops", feeStroops.toString());
-
-      // ─── 5. Decrypt OpEx SK and deposit into channel ───────
-      const opexSk = await decryptSk(
-        merchant.encryptedOpexSk,
-        SERVICE_AUTH_SECRET,
-      );
-      const opexKeypair = Keypair.fromSecret(opexSk);
-      const networkPassphrase = STELLAR_NETWORK_PASSPHRASE;
-
-      const server = new rpc.Server(STELLAR_RPC_URL, {
-        allowHttp: STELLAR_RPC_URL.startsWith("http://"),
-      });
-
-      const opexAccount = await server.getAccount(opexKeypair.publicKey());
-      const sacContract = new Contract(selectedChannel.assetContractId);
-      const depositTx = new TransactionBuilder(opexAccount, {
-        fee: "10000000",
-        networkPassphrase,
-      })
-        .addOperation(
-          sacContract.call(
-            "transfer",
-            new Address(opexKeypair.publicKey()).toScVal(),
-            new Address(selectedChannel.privacyChannelId).toScVal(),
-            nativeToScVal(netStroops, { type: "i128" }),
-          ),
-        )
-        .setTimeout(300)
-        .build();
-
-      const sim = await server.simulateTransaction(depositTx);
-      if ("error" in sim && sim.error) {
-        throw new Error(`Deposit simulation failed: ${sim.error}`);
-      }
-      const preparedDeposit = rpc.assembleTransaction(depositTx, sim).build();
-      preparedDeposit.sign(opexKeypair);
-      const depositResult = await server.sendTransaction(preparedDeposit);
-      span.setAttribute("deposit.tx_hash", depositResult.hash);
-
-      const deadline = Date.now() + 60000;
-      while (Date.now() < deadline) {
-        const status = await server.getTransaction(depositResult.hash);
-        if (status.status === "SUCCESS") break;
-        if (status.status === "FAILED") {
-          throw new Error("Deposit transaction failed on-chain");
+        if (!selectedCouncil || !selectedChannel) {
+          ctx.response.status = Status.ServiceUnavailable;
+          ctx.response.body = { message: `No ${assetCode} channel available` };
+          if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
+          return;
         }
-        await new Promise((r) => setTimeout(r, 2000));
-      }
+        span.setAttribute("council.id", selectedCouncil.id);
+        span.setAttribute("channel.id", selectedChannel.id);
 
-      LOG.info("Deposit confirmed on-chain", { txHash: depositResult.hash });
-
-      // ─── 6. Build MLXDR bundle ─────────────────────────────
-      const merchantUtxos = await utxoRepo.findByIds(
-        Array.isArray(merchantUtxoIds) ? merchantUtxoIds : [],
-      );
-
-      const merchantAmounts = partitionAmount(netStroops, merchantUtxos.length);
-      const merchantCreateOps = merchantUtxos.map((u, i) =>
-        MoonlightOperation.create(
-          Uint8Array.from(atob(u.utxoPublicKey), (c) => c.charCodeAt(0)),
-          merchantAmounts[i],
-        )
-      );
-
-      const tempCount = merchantUtxos.length;
-      const tempKeypairs: Array<
-        { publicKey: Uint8Array; privateKey: Uint8Array }
-      > = [];
-      for (let i = 0; i < tempCount; i++) {
-        const seed = crypto.getRandomValues(new Uint8Array(32));
-        tempKeypairs.push(await deriveP256Keypair(seed));
-      }
-
-      const tempAmounts = partitionAmount(netStroops, tempCount);
-      const tempCreateOps = tempKeypairs.map((kp, i) =>
-        MoonlightOperation.create(kp.publicKey, tempAmounts[i])
-      );
-
-      const expirationLedger = 999999999;
-
-      const depositOp = MoonlightOperation.deposit(
-        opexKeypair.publicKey() as `G${string}`,
-        netStroops,
-      ).addConditions(tempCreateOps.map((op) => op.toCondition()));
-
-      const spendOps = [];
-      for (let i = 0; i < tempKeypairs.length; i++) {
-        const spendOp = MoonlightOperation.spend(tempKeypairs[i].publicKey);
-        for (const merchantCreate of merchantCreateOps) {
-          spendOp.addCondition(merchantCreate.toCondition());
+        const pps = await ppRepo.findActiveByCouncilId(selectedCouncil.id);
+        if (pps.length === 0) {
+          ctx.response.status = Status.ServiceUnavailable;
+          ctx.response.body = { message: "No privacy provider available" };
+          if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
+          return;
         }
-        // deno-lint-ignore no-explicit-any
-        const utxoAdapter: any = {
-          publicKey: tempKeypairs[i].publicKey,
-          signPayload: async (hash: Uint8Array) => {
-            const hashBuf = new ArrayBuffer(hash.length);
-            new Uint8Array(hashBuf).set(hash);
-            const pkcs8 = buildPkcs8P256(tempKeypairs[i].privateKey);
-            const key = await crypto.subtle.importKey(
-              "pkcs8",
-              pkcs8,
-              { name: "ECDSA", namedCurve: "P-256" },
-              false,
-              ["sign"],
-            );
-            const sig = await crypto.subtle.sign(
-              { name: "ECDSA", hash: "SHA-256" },
-              key,
-              hashBuf,
-            );
-            return new Uint8Array(sig);
-          },
-        };
-        await spendOp.signWithUTXO(
-          utxoAdapter,
-          selectedChannel.privacyChannelId as `C${string}`,
-          expirationLedger,
+        const pp = pps[Math.floor(Math.random() * pps.length)];
+        span.setAttribute("pp.id", pp.id);
+
+        // ─── 3. Verify customer payment on-chain ───────────────
+        log.event("verifying customer payment on-chain");
+        const horizonUrl = STELLAR_RPC_URL.includes("/soroban/rpc")
+          ? STELLAR_RPC_URL.replace("/soroban/rpc", "")
+          : STELLAR_RPC_URL;
+
+        const txRes = await fetch(
+          `${horizonUrl}/transactions/${customerPaymentHash}/operations`,
         );
-        spendOps.push(spendOp);
-      }
+        if (!txRes.ok) {
+          ctx.response.status = Status.BadRequest;
+          ctx.response.body = {
+            message: "Customer payment not found on-chain",
+          };
+          if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
+          return;
+        }
+        const txOps = await txRes.json();
+        const paymentOp = txOps._embedded?.records?.find(
+          (
+            op: {
+              type: string;
+              to?: string;
+              amount?: string;
+              funder?: string;
+              account?: string;
+            },
+          ) =>
+            (op.type === "payment" && op.to === merchant.opexPublicKey) ||
+            (op.type === "create_account" &&
+              op.account === merchant.opexPublicKey),
+        );
+        if (!paymentOp) {
+          ctx.response.status = Status.BadRequest;
+          ctx.response.body = {
+            message: "No payment to OpEx address found in transaction",
+          };
+          if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
+          return;
+        }
+        const paidAmount = paymentOp.amount ?? paymentOp.starting_balance ??
+          "0";
+        const paidStroops = BigInt(Math.round(parseFloat(paidAmount) * 1e7));
+        if (paidStroops < amountStroops) {
+          ctx.response.status = Status.BadRequest;
+          ctx.response.body = {
+            message:
+              `Insufficient payment: expected ${amountStroops}, got ${paidStroops}`,
+          };
+          if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
+          return;
+        }
+        log.event("customer payment verified");
 
-      const operationsMLXDR = [
-        depositOp.toMLXDR(),
-        ...tempCreateOps.map((op) => op.toMLXDR()),
-        ...spendOps.map((op) => op.toMLXDR()),
-        ...merchantCreateOps.map((op) => op.toMLXDR()),
-      ];
+        // ─── 4. Calculate net amount ───────────────────────────
+        const feeStroops = amountStroops * BigInt(Math.round(feePct * 100)) /
+          10000n;
+        const netStroops = amountStroops - feeStroops;
+        span.setAttribute("net.stroops", netStroops.toString());
+        span.setAttribute("fee.stroops", feeStroops.toString());
 
-      // ─── 7. Submit bundle to provider-platform ─────────────
-      const providerJwt = await getProviderJwt(pp.url);
-      const bundleRes = await fetch(
-        `${pp.url}/api/v1/providers/${pp.publicKey}/bundles`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${providerJwt}`,
-          },
-          body: JSON.stringify({
-            operationsMLXDR,
-            channelContractId: selectedChannel.privacyChannelId,
-          }),
-        },
-      );
+        // ─── 5. Decrypt OpEx SK and deposit into channel ───────
+        log.event("depositing OpEx to privacy channel");
+        const opexSk = await decryptSk(
+          merchant.encryptedOpexSk,
+          SERVICE_AUTH_SECRET,
+        );
+        const opexKeypair = Keypair.fromSecret(opexSk);
+        const networkPassphrase = STELLAR_NETWORK_PASSPHRASE;
 
-      if (!bundleRes.ok) {
-        const errBody = await bundleRes.text().catch(() => "");
-        LOG.error("Provider bundle submission failed", {
-          status: bundleRes.status,
-          body: errBody,
+        const server = new rpc.Server(STELLAR_RPC_URL, {
+          allowHttp: STELLAR_RPC_URL.startsWith("http://"),
         });
-        ctx.response.status = Status.BadGateway;
-        ctx.response.body = {
-          message: "Payment processing failed — provider rejected the bundle",
-        };
-        if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
-        return;
-      }
 
-      const bundleData = await bundleRes.json().catch(() => ({}));
-      const bundleId = bundleData?.data?.operationsBundleId ?? null;
-      if (bundleId) span.setAttribute("bundle.id", bundleId);
+        const opexAccount = await server.getAccount(opexKeypair.publicKey());
+        const sacContract = new Contract(selectedChannel.assetContractId);
+        const depositTx = new TransactionBuilder(opexAccount, {
+          fee: "10000000",
+          networkPassphrase,
+        })
+          .addOperation(
+            sacContract.call(
+              "transfer",
+              new Address(opexKeypair.publicKey()).toScVal(),
+              new Address(selectedChannel.privacyChannelId).toScVal(),
+              nativeToScVal(netStroops, { type: "i128" }),
+            ),
+          )
+          .setTimeout(300)
+          .build();
 
-      // ─── 8. Record transactions ────────────────────────────
-      if (Array.isArray(merchantUtxoIds) && merchantUtxoIds.length > 0) {
-        await utxoRepo.markSpent(merchantUtxoIds);
-      }
+        const sim = await server.simulateTransaction(depositTx);
+        if ("error" in sim && sim.error) {
+          throw new Error(`Deposit simulation failed: ${sim.error}`);
+        }
+        const preparedDeposit = rpc.assembleTransaction(depositTx, sim).build();
+        preparedDeposit.sign(opexKeypair);
+        const depositResult = await server.sendTransaction(preparedDeposit);
+        span.setAttribute("deposit.tx_hash", depositResult.hash);
 
-      const inTx = await txRepo.create({
-        walletPublicKey: merchantWallet,
-        direction: "IN",
-        status: "COMPLETED",
-        method: "CRYPTO_INSTANT",
-        amountStroops: netStroops,
-        feeStroops,
-        counterparty: null,
-        description: description ?? null,
-        bundleId,
-        completedAt: new Date(),
-      });
+        const deadline = Date.now() + 60000;
+        while (Date.now() < deadline) {
+          const status = await server.getTransaction(depositResult.hash);
+          if (status.status === "SUCCESS") break;
+          if (status.status === "FAILED") {
+            throw new Error("Deposit transaction failed on-chain");
+          }
+          await new Promise((r) => setTimeout(r, 2000));
+        }
 
-      LOG.info("Instant payment completed", {
-        merchantWallet,
-        amountStroops: amountStroops.toString(),
-        netStroops: netStroops.toString(),
-        feeStroops: feeStroops.toString(),
-        bundleId,
-        txId: inTx.id,
-      });
+        log.debug("txHash", depositResult.hash);
+        log.event("deposit confirmed on-chain");
 
-      ctx.response.body = {
-        data: {
-          transactionId: inTx.id,
-          bundleId,
+        // ─── 6. Build MLXDR bundle ─────────────────────────────
+        const merchantUtxos = await utxoRepo.findByIds(
+          Array.isArray(merchantUtxoIds) ? merchantUtxoIds : [],
+        );
+
+        const merchantAmounts = partitionAmount(
+          netStroops,
+          merchantUtxos.length,
+        );
+        const merchantCreateOps = merchantUtxos.map((u, i) =>
+          MoonlightOperation.create(
+            Uint8Array.from(atob(u.utxoPublicKey), (c) => c.charCodeAt(0)),
+            merchantAmounts[i],
+          )
+        );
+
+        const tempCount = merchantUtxos.length;
+        const tempKeypairs: Array<
+          { publicKey: Uint8Array; privateKey: Uint8Array }
+        > = [];
+        for (let i = 0; i < tempCount; i++) {
+          const seed = crypto.getRandomValues(new Uint8Array(32));
+          tempKeypairs.push(await deriveP256Keypair(seed));
+        }
+
+        const tempAmounts = partitionAmount(netStroops, tempCount);
+        const tempCreateOps = tempKeypairs.map((kp, i) =>
+          MoonlightOperation.create(kp.publicKey, tempAmounts[i])
+        );
+
+        const expirationLedger = 999999999;
+
+        const depositOp = MoonlightOperation.deposit(
+          opexKeypair.publicKey() as `G${string}`,
+          netStroops,
+        ).addConditions(tempCreateOps.map((op) => op.toCondition()));
+
+        const spendOps = [];
+        for (let i = 0; i < tempKeypairs.length; i++) {
+          const spendOp = MoonlightOperation.spend(tempKeypairs[i].publicKey);
+          for (const merchantCreate of merchantCreateOps) {
+            spendOp.addCondition(merchantCreate.toCondition());
+          }
+          // deno-lint-ignore no-explicit-any
+          const utxoAdapter: any = {
+            publicKey: tempKeypairs[i].publicKey,
+            signPayload: async (hash: Uint8Array) => {
+              const hashBuf = new ArrayBuffer(hash.length);
+              new Uint8Array(hashBuf).set(hash);
+              const pkcs8 = buildPkcs8P256(tempKeypairs[i].privateKey);
+              const key = await crypto.subtle.importKey(
+                "pkcs8",
+                pkcs8,
+                { name: "ECDSA", namedCurve: "P-256" },
+                false,
+                ["sign"],
+              );
+              const sig = await crypto.subtle.sign(
+                { name: "ECDSA", hash: "SHA-256" },
+                key,
+                hashBuf,
+              );
+              return new Uint8Array(sig);
+            },
+          };
+          await spendOp.signWithUTXO(
+            utxoAdapter,
+            selectedChannel.privacyChannelId as `C${string}`,
+            expirationLedger,
+          );
+          spendOps.push(spendOp);
+        }
+
+        const operationsMLXDR = [
+          depositOp.toMLXDR(),
+          ...tempCreateOps.map((op) => op.toMLXDR()),
+          ...spendOps.map((op) => op.toMLXDR()),
+          ...merchantCreateOps.map((op) => op.toMLXDR()),
+        ];
+
+        // ─── 7. Submit bundle to provider-platform ─────────────
+        log.event("submitting bundle to provider-platform");
+        const providerJwt = await getProviderJwt(pp.url, { log });
+        const bundleRes = await fetch(
+          `${pp.url}/api/v1/providers/${pp.publicKey}/bundles`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${providerJwt}`,
+            },
+            body: JSON.stringify({
+              operationsMLXDR,
+              channelContractId: selectedChannel.privacyChannelId,
+            }),
+          },
+        );
+
+        if (!bundleRes.ok) {
+          const errBody = await bundleRes.text().catch(() => "");
+          log.debug("status", bundleRes.status);
+          log.debug("body", errBody);
+          log.error(
+            new Error(`HTTP ${bundleRes.status}`),
+            "provider bundle submission failed",
+          );
+          ctx.response.status = Status.BadGateway;
+          ctx.response.body = {
+            message: "Payment processing failed — provider rejected the bundle",
+          };
+          if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
+          return;
+        }
+
+        const bundleData = await bundleRes.json().catch(() => ({}));
+        const bundleId = bundleData?.data?.operationsBundleId ?? null;
+        if (bundleId) span.setAttribute("bundle.id", bundleId);
+
+        // ─── 8. Record transactions ────────────────────────────
+        if (Array.isArray(merchantUtxoIds) && merchantUtxoIds.length > 0) {
+          await utxoRepo.markSpent(merchantUtxoIds);
+        }
+
+        const inTx = await txRepo.create({
+          walletPublicKey: merchantWallet,
+          direction: "IN",
           status: "COMPLETED",
-        },
-      };
-    } catch (error) {
-      LOG.error("Failed to execute instant payment", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      ctx.response.status = Status.InternalServerError;
-      ctx.response.body = { message: "Failed to process payment" };
-      if (merchantUtxoIds) {
-        try {
-          await utxoRepo.release(merchantUtxoIds);
-        } catch { /* best effort */ }
+          method: "CRYPTO_INSTANT",
+          amountStroops: netStroops,
+          feeStroops,
+          counterparty: null,
+          description: description ?? null,
+          bundleId,
+          completedAt: new Date(),
+        });
+
+        log.debug("netStroops", netStroops.toString());
+        log.debug("feeStroops", feeStroops.toString());
+        log.debug("bundleId", bundleId);
+        log.debug("txId", inTx.id);
+        log.event("instant payment completed");
+
+        ctx.response.body = {
+          data: {
+            transactionId: inTx.id,
+            bundleId,
+            status: "COMPLETED",
+          },
+        };
+      } catch (error) {
+        log.error(error, "failed to execute instant payment");
+        ctx.response.status = Status.InternalServerError;
+        ctx.response.body = { message: "Failed to process payment" };
+        if (merchantUtxoIds) {
+          try {
+            await utxoRepo.release(merchantUtxoIds);
+          } catch { /* best effort */ }
+        }
       }
-    }
-  });
+    });
+}
 
 // ─── Helpers ───────────────────────────────────────────────────
 

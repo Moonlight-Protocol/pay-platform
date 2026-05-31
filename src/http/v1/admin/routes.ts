@@ -1,46 +1,61 @@
 import { Router } from "@oak/oak";
+import type { Logger } from "@/utils/logger/index.ts";
 import { adminMiddleware } from "@/http/middleware/admin/index.ts";
 import {
-  createCouncil,
-  createCouncilChannel,
-  createCouncilPp,
-  deleteCouncil,
-  deleteCouncilChannel,
-  deleteCouncilPp,
-  discoverCouncil,
-  getCouncil,
-  listCouncilChannels,
-  listCouncilPps,
-  listCouncils,
-  updateCouncil,
-  updateCouncilPp,
+  handleCreateCouncil,
+  handleCreateCouncilChannel,
+  handleCreateCouncilPp,
+  handleDeleteCouncil,
+  handleDeleteCouncilChannel,
+  handleDeleteCouncilPp,
+  handleDiscoverCouncil,
+  handleGetCouncil,
+  handleListCouncilChannels,
+  handleListCouncilPps,
+  handleListCouncils,
+  handleUpdateCouncil,
+  handleUpdateCouncilPp,
 } from "@/http/v1/admin/councils.ts";
 
-const adminRouter = new Router({ prefix: "/admin" });
+export function buildAdminRouter(deps: { log: Logger }): Router {
+  const adminRouter = new Router({ prefix: "/admin" });
 
-// All admin routes require JWT + wallet in ADMIN_WALLETS allowlist
-adminRouter.use(adminMiddleware);
+  // All admin routes require JWT + wallet in ADMIN_WALLETS allowlist
+  adminRouter.use(adminMiddleware(deps));
 
-// Councils
-adminRouter.post("/councils/discover", discoverCouncil);
-adminRouter.get("/councils", listCouncils);
-adminRouter.post("/councils", createCouncil);
-adminRouter.get("/councils/:id", getCouncil);
-adminRouter.patch("/councils/:id", updateCouncil);
-adminRouter.delete("/councils/:id", deleteCouncil);
+  // Councils
+  adminRouter.post("/councils/discover", handleDiscoverCouncil(deps));
+  adminRouter.get("/councils", handleListCouncils(deps));
+  adminRouter.post("/councils", handleCreateCouncil(deps));
+  adminRouter.get("/councils/:id", handleGetCouncil(deps));
+  adminRouter.patch("/councils/:id", handleUpdateCouncil(deps));
+  adminRouter.delete("/councils/:id", handleDeleteCouncil(deps));
 
-// Council Channels (nested under council)
-adminRouter.get("/councils/:councilId/channels", listCouncilChannels);
-adminRouter.post("/councils/:councilId/channels", createCouncilChannel);
-adminRouter.delete(
-  "/councils/:councilId/channels/:channelId",
-  deleteCouncilChannel,
-);
+  // Council Channels (nested under council)
+  adminRouter.get(
+    "/councils/:councilId/channels",
+    handleListCouncilChannels(deps),
+  );
+  adminRouter.post(
+    "/councils/:councilId/channels",
+    handleCreateCouncilChannel(deps),
+  );
+  adminRouter.delete(
+    "/councils/:councilId/channels/:channelId",
+    handleDeleteCouncilChannel(deps),
+  );
 
-// Council PPs (nested under council)
-adminRouter.get("/councils/:councilId/pps", listCouncilPps);
-adminRouter.post("/councils/:councilId/pps", createCouncilPp);
-adminRouter.patch("/councils/:councilId/pps/:ppId", updateCouncilPp);
-adminRouter.delete("/councils/:councilId/pps/:ppId", deleteCouncilPp);
+  // Council PPs (nested under council)
+  adminRouter.get("/councils/:councilId/pps", handleListCouncilPps(deps));
+  adminRouter.post("/councils/:councilId/pps", handleCreateCouncilPp(deps));
+  adminRouter.patch(
+    "/councils/:councilId/pps/:ppId",
+    handleUpdateCouncilPp(deps),
+  );
+  adminRouter.delete(
+    "/councils/:councilId/pps/:ppId",
+    handleDeleteCouncilPp(deps),
+  );
 
-export default adminRouter;
+  return adminRouter;
+}

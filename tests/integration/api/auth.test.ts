@@ -4,19 +4,20 @@
  * Run with: deno test --allow-all --no-check --config tests/deno.json tests/integration/api/auth.test.ts
  */
 import { assertEquals, assertExists } from "@std/assert";
+import { newNoop } from "@/utils/logger/index.ts";
 import { Buffer } from "buffer";
 import { createMockContext } from "../../test_app.ts";
 import { _TEST_WALLET_KEYPAIR } from "../../mock_env.ts";
 import { ensureInitialized, resetDb } from "../../pglite_db.ts";
-import { postChallengeHandler } from "@/http/v1/auth/challenge.ts";
-import { postVerifyHandler } from "@/http/v1/auth/verify.ts";
+import { handlePostChallenge } from "@/http/v1/auth/challenge.ts";
+import { handlePostVerify } from "@/http/v1/auth/verify.ts";
 
 async function getNonce(publicKey: string): Promise<string> {
   const { ctx, getResponse } = createMockContext({
     method: "POST",
     body: { publicKey },
   });
-  await postChallengeHandler(ctx);
+  await handlePostChallenge({ log: newNoop() })(ctx);
   const res = getResponse();
   assertEquals(res.status, 200);
   return res.body.data.nonce as string;
@@ -56,7 +57,7 @@ Deno.test("POST /auth/challenge - returns a nonce for a valid public key", async
     method: "POST",
     body: { publicKey: _TEST_WALLET_KEYPAIR.publicKey() },
   });
-  await postChallengeHandler(ctx);
+  await handlePostChallenge({ log: newNoop() })(ctx);
 
   const res = getResponse();
   assertEquals(res.status, 200);
@@ -71,7 +72,7 @@ Deno.test("POST /auth/challenge - rejects missing publicKey", async () => {
     method: "POST",
     body: {},
   });
-  await postChallengeHandler(ctx);
+  await handlePostChallenge({ log: newNoop() })(ctx);
 
   const res = getResponse();
   assertEquals(res.status, 400);
@@ -85,7 +86,7 @@ Deno.test("POST /auth/challenge - rejects invalid public key format", async () =
     method: "POST",
     body: { publicKey: "not-a-valid-key" },
   });
-  await postChallengeHandler(ctx);
+  await handlePostChallenge({ log: newNoop() })(ctx);
 
   const res = getResponse();
   assertEquals(res.status, 400);
@@ -103,7 +104,7 @@ Deno.test("POST /auth/verify - returns a JWT for a valid SEP-53 signature", asyn
     method: "POST",
     body: { nonce, signature, publicKey },
   });
-  await postVerifyHandler(ctx);
+  await handlePostVerify({ log: newNoop() })(ctx);
 
   const res = getResponse();
   assertEquals(res.status, 200);
@@ -121,7 +122,7 @@ Deno.test("POST /auth/verify - rejects an invalid signature", async () => {
     method: "POST",
     body: { nonce, signature: "AAAA", publicKey },
   });
-  await postVerifyHandler(ctx);
+  await handlePostVerify({ log: newNoop() })(ctx);
 
   const res = getResponse();
   assertEquals(res.status, 401);
@@ -139,7 +140,7 @@ Deno.test("POST /auth/verify - rejects nonce that was never issued", async () =>
       publicKey: _TEST_WALLET_KEYPAIR.publicKey(),
     },
   });
-  await postVerifyHandler(ctx);
+  await handlePostVerify({ log: newNoop() })(ctx);
 
   const res = getResponse();
   assertEquals(res.status, 401);

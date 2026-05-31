@@ -10,7 +10,7 @@
  */
 import { Keypair, Transaction } from "stellar-sdk";
 import { PAY_SERVICE_SK } from "@/config/env.ts";
-import { LOG } from "@/config/logger.ts";
+import type { Logger } from "@/utils/logger/index.ts";
 import { withSpan } from "@/core/tracing.ts";
 
 interface CachedAuth {
@@ -51,7 +51,14 @@ function parseJwtExpiry(jwt: string): number {
  * Get a valid JWT for the given provider-platform URL.
  * Returns a cached JWT if still valid, otherwise authenticates fresh.
  */
-export function getProviderJwt(ppUrl: string): Promise<string> {
+export function getProviderJwt(
+  ppUrl: string,
+  deps: { log: Logger },
+): Promise<string> {
+  const log = deps.log.scope("getProviderJwt");
+  log.info("getProviderJwt");
+  log.debug("ppUrl", ppUrl);
+
   return withSpan("ProviderAuth.getJwt", async (span) => {
     span.setAttribute("provider.url", ppUrl);
     const cached = cache.get(ppUrl);
@@ -65,7 +72,8 @@ export function getProviderJwt(ppUrl: string): Promise<string> {
     const publicKey = keypair.publicKey();
     span.setAttribute("provider.public_key", publicKey);
 
-    LOG.debug("Authenticating with provider-platform", { ppUrl, publicKey });
+    log.debug("publicKey", publicKey);
+    log.event("requesting challenge");
 
     // 1. Get challenge
     const challengeRes = await fetch(
@@ -83,6 +91,8 @@ export function getProviderJwt(ppUrl: string): Promise<string> {
       throw new Error("Provider returned no challenge XDR");
     }
 
+    log.event("challenge received");
+
     // 2. Co-sign the challenge transaction
     // The provider uses "Standalone Network ; February 2017" for local,
     // but we parse the XDR without needing the passphrase for signing —
@@ -93,6 +103,8 @@ export function getProviderJwt(ppUrl: string): Promise<string> {
     );
     tx.sign(keypair);
     const signedXdr = tx.toXDR();
+
+    log.event("submitting signed challenge");
 
     // 3. Submit co-signed challenge
     const verifyRes = await fetch(`${ppUrl}/api/v1/stellar/auth`, {
@@ -113,7 +125,7 @@ export function getProviderJwt(ppUrl: string): Promise<string> {
     }
 
     cache.set(ppUrl, { jwt, expiresAt: parseJwtExpiry(jwt) });
-    LOG.info("Authenticated with provider-platform", { ppUrl, publicKey });
+    log.event("authenticated with provider-platform");
 
     return jwt;
   });

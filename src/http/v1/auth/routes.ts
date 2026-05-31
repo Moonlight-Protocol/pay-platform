@@ -1,10 +1,11 @@
 import { Router } from "@oak/oak";
-import { postChallengeHandler } from "./challenge.ts";
-import { postVerifyHandler } from "./verify.ts";
+import type { Logger } from "@/utils/logger/index.ts";
+import { handlePostChallenge } from "./challenge.ts";
+import { handlePostVerify } from "./verify.ts";
 
-const authRouter = new Router();
-
-authRouter.post("/auth/challenge", postChallengeHandler);
-authRouter.post("/auth/verify", postVerifyHandler);
-
-export default authRouter;
+export function buildAuthRouter(deps: { log: Logger }): Router {
+  const authRouter = new Router();
+  authRouter.post("/auth/challenge", handlePostChallenge(deps));
+  authRouter.post("/auth/verify", handlePostVerify(deps));
+  return authRouter;
+}

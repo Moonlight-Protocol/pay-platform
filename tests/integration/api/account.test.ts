@@ -4,11 +4,12 @@
  * Run with: deno test --allow-all --no-check --config tests/deno.json tests/integration/api/account.test.ts
  */
 import { assertEquals, assertExists } from "@std/assert";
+import { newNoop } from "@/utils/logger/index.ts";
 import { createMockContext } from "../../test_app.ts";
 import { _TEST_WALLET_KEYPAIR } from "../../mock_env.ts";
 import { ensureInitialized, resetDb } from "../../pglite_db.ts";
-import { postAccountHandler } from "@/http/v1/account/post.ts";
-import { getMeHandler, patchMeHandler } from "@/http/v1/account/me.ts";
+import { handlePostAccount } from "@/http/v1/account/post.ts";
+import { handleGetMe, handlePatchMe } from "@/http/v1/account/me.ts";
 
 const walletPublicKey = _TEST_WALLET_KEYPAIR.publicKey();
 const session = {
@@ -34,7 +35,7 @@ Deno.test("POST /account - creates a new account", async () => {
     body: VALID_BODY,
     state: { session },
   });
-  await postAccountHandler(ctx);
+  await handlePostAccount({ log: newNoop() })(ctx);
 
   const res = getResponse();
   assertEquals(res.status, 201);
@@ -55,7 +56,7 @@ Deno.test("POST /account - is idempotent (returns existing on second call)", asy
     body: VALID_BODY,
     state: { session },
   });
-  await postAccountHandler(ctx1.ctx);
+  await handlePostAccount({ log: newNoop() })(ctx1.ctx);
   assertEquals(ctx1.getResponse().status, 201);
 
   // Second call should return existing
@@ -64,7 +65,7 @@ Deno.test("POST /account - is idempotent (returns existing on second call)", asy
     body: { ...VALID_BODY, email: "different@example.com" },
     state: { session },
   });
-  await postAccountHandler(ctx2.ctx);
+  await handlePostAccount({ log: newNoop() })(ctx2.ctx);
 
   const res = ctx2.getResponse();
   assertEquals(res.status, 200);
@@ -81,7 +82,7 @@ Deno.test("POST /account - rejects missing email", async () => {
     body: { jurisdictionCountryCode: "ES" },
     state: { session },
   });
-  await postAccountHandler(ctx);
+  await handlePostAccount({ log: newNoop() })(ctx);
 
   assertEquals(getResponse().status, 400);
 });
@@ -95,7 +96,7 @@ Deno.test("POST /account - rejects invalid email", async () => {
     body: { ...VALID_BODY, email: "not-an-email" },
     state: { session },
   });
-  await postAccountHandler(ctx);
+  await handlePostAccount({ log: newNoop() })(ctx);
 
   assertEquals(getResponse().status, 400);
 });
@@ -109,7 +110,7 @@ Deno.test("POST /account - rejects invalid jurisdiction", async () => {
     body: { ...VALID_BODY, jurisdictionCountryCode: "spain" },
     state: { session },
   });
-  await postAccountHandler(ctx);
+  await handlePostAccount({ log: newNoop() })(ctx);
 
   assertEquals(getResponse().status, 400);
 });
@@ -123,7 +124,7 @@ Deno.test("POST /account - normalizes jurisdiction to uppercase", async () => {
     body: { ...VALID_BODY, jurisdictionCountryCode: "es" },
     state: { session },
   });
-  await postAccountHandler(ctx);
+  await handlePostAccount({ log: newNoop() })(ctx);
 
   const res = getResponse();
   // Lowercase fails the validation regex (only [A-Z]{2}), so 400 is correct.
@@ -140,13 +141,13 @@ Deno.test("GET /account/me - returns the authenticated wallet's account", async 
     body: VALID_BODY,
     state: { session },
   });
-  await postAccountHandler(createCtx.ctx);
+  await handlePostAccount({ log: newNoop() })(createCtx.ctx);
 
   const { ctx, getResponse } = createMockContext({
     method: "GET",
     state: { session },
   });
-  await getMeHandler(ctx);
+  await handleGetMe({ log: newNoop() })(ctx);
 
   const res = getResponse();
   assertEquals(res.status, 200);
@@ -162,7 +163,7 @@ Deno.test("GET /account/me - returns 404 if no account exists", async () => {
     method: "GET",
     state: { session },
   });
-  await getMeHandler(ctx);
+  await handleGetMe({ log: newNoop() })(ctx);
 
   assertEquals(getResponse().status, 404);
 });
@@ -176,14 +177,14 @@ Deno.test("PATCH /account/me - updates jurisdiction", async () => {
     body: VALID_BODY,
     state: { session },
   });
-  await postAccountHandler(createCtx.ctx);
+  await handlePostAccount({ log: newNoop() })(createCtx.ctx);
 
   const { ctx, getResponse } = createMockContext({
     method: "PATCH",
     body: { jurisdictionCountryCode: "AR" },
     state: { session },
   });
-  await patchMeHandler(ctx);
+  await handlePatchMe({ log: newNoop() })(ctx);
 
   const res = getResponse();
   assertEquals(res.status, 200);
@@ -201,14 +202,14 @@ Deno.test("PATCH /account/me - updates email and displayName", async () => {
     body: VALID_BODY,
     state: { session },
   });
-  await postAccountHandler(createCtx.ctx);
+  await handlePostAccount({ log: newNoop() })(createCtx.ctx);
 
   const { ctx, getResponse } = createMockContext({
     method: "PATCH",
     body: { email: "alice2@example.com", displayName: "Alice 2" },
     state: { session },
   });
-  await patchMeHandler(ctx);
+  await handlePatchMe({ log: newNoop() })(ctx);
 
   const res = getResponse();
   assertEquals(res.status, 200);
@@ -225,7 +226,7 @@ Deno.test("PATCH /account/me - returns 404 if no account exists", async () => {
     body: { displayName: "x" },
     state: { session },
   });
-  await patchMeHandler(ctx);
+  await handlePatchMe({ log: newNoop() })(ctx);
 
   assertEquals(getResponse().status, 404);
 });
@@ -239,14 +240,14 @@ Deno.test("PATCH /account/me - rejects empty body", async () => {
     body: VALID_BODY,
     state: { session },
   });
-  await postAccountHandler(createCtx.ctx);
+  await handlePostAccount({ log: newNoop() })(createCtx.ctx);
 
   const { ctx, getResponse } = createMockContext({
     method: "PATCH",
     body: {},
     state: { session },
   });
-  await patchMeHandler(ctx);
+  await handlePatchMe({ log: newNoop() })(ctx);
 
   assertEquals(getResponse().status, 400);
 });
@@ -260,14 +261,14 @@ Deno.test("PATCH /account/me - rejects invalid email", async () => {
     body: VALID_BODY,
     state: { session },
   });
-  await postAccountHandler(createCtx.ctx);
+  await handlePostAccount({ log: newNoop() })(createCtx.ctx);
 
   const { ctx, getResponse } = createMockContext({
     method: "PATCH",
     body: { email: "not-an-email" },
     state: { session },
   });
-  await patchMeHandler(ctx);
+  await handlePatchMe({ log: newNoop() })(ctx);
 
   assertEquals(getResponse().status, 400);
 });

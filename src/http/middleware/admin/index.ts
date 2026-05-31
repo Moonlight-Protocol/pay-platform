@@ -3,7 +3,7 @@ import {
   jwtMiddleware,
   type JwtSessionData,
 } from "@/http/middleware/auth/index.ts";
-import { LOG } from "@/config/logger.ts";
+import type { Logger } from "@/utils/logger/index.ts";
 import { loadOptionalEnv } from "@/utils/env/loadEnv.ts";
 import { MODE } from "@/config/env.ts";
 
@@ -32,36 +32,43 @@ function getAdminWallets(): Set<string> {
  * Runs jwtMiddleware first to verify the token, then checks the subject
  * against the allowlist.
  */
-export async function adminMiddleware(
-  ctx: Context,
-  next: () => Promise<unknown>,
-) {
-  // First verify the JWT is valid
-  await jwtMiddleware(ctx, async () => {
-    // JWT verified — check if the wallet is in the admin allowlist
-    const session = ctx.state.session as JwtSessionData;
-    const adminWallets = getAdminWallets();
+export function adminMiddleware(
+  deps: { log: Logger },
+): (ctx: Context, next: () => Promise<unknown>) => Promise<void> {
+  const log = deps.log.scope("adminMiddleware");
 
-    if (adminWallets.size === 0) {
-      LOG.warn("Admin access attempted but ADMIN_WALLETS is empty");
-      ctx.response.status = 403;
-      ctx.response.body = { message: "Admin access not configured" };
-      return;
-    }
+  return async (ctx, next) => {
+    // First verify the JWT is valid
+    await jwtMiddleware(deps)(ctx, async () => {
+      // JWT verified — check if the wallet is in the admin allowlist
+      const session = ctx.state.session as JwtSessionData;
+      const adminWallets = getAdminWallets();
 
-    // In development mode, skip the allowlist check
-    if (MODE === "development") {
+      if (adminWallets.size === 0) {
+        log.error(
+          new Error("ADMIN_WALLETS empty"),
+          "admin access attempted but ADMIN_WALLETS is empty",
+        );
+        ctx.response.status = 403;
+        ctx.response.body = { message: "Admin access not configured" };
+        return;
+      }
+
+      // In development mode, skip the allowlist check
+      if (MODE === "development") {
+        await next();
+        return;
+      }
+
+      if (!adminWallets.has(session.sub)) {
+        log.debug("wallet", session.sub);
+        log.error(new Error("not in allowlist"), "admin access denied");
+        ctx.response.status = 403;
+        ctx.response.body = { message: "Forbidden" };
+        return;
+      }
+
       await next();
-      return;
-    }
-
-    if (!adminWallets.has(session.sub)) {
-      LOG.warn("Admin access denied", { wallet: session.sub });
-      ctx.response.status = 403;
-      ctx.response.body = { message: "Forbidden" };
-      return;
-    }
-
-    await next();
-  });
+    });
+  };
 }
