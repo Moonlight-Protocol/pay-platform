@@ -8,7 +8,7 @@
  *
  * Sessions expire after 5 minutes if not submitted.
  */
-import { LOG } from "@/config/logger.ts";
+import type { Logger } from "@/utils/logger/index.ts";
 
 const SESSION_TTL_MS = 5 * 60 * 1000;
 
@@ -47,17 +47,27 @@ export interface PaymentSession {
 
 const sessions = new Map<string, PaymentSession>();
 
-export function createSession(session: PaymentSession): void {
+export function createSession(
+  session: PaymentSession,
+  deps: { log: Logger },
+): void {
+  const log = deps.log.scope("paymentSession");
   sessions.set(session.id, session);
-  LOG.debug("Payment session created", { id: session.id });
+  log.debug("id", session.id);
+  log.event("payment session created");
 }
 
-export function getSession(id: string): PaymentSession | undefined {
+export function getSession(
+  id: string,
+  deps: { log: Logger },
+): PaymentSession | undefined {
+  const log = deps.log.scope("paymentSession");
   const session = sessions.get(id);
   if (!session) return undefined;
   if (Date.now() - session.createdAt > SESSION_TTL_MS) {
     sessions.delete(id);
-    LOG.debug("Payment session expired", { id });
+    log.debug("id", id);
+    log.event("payment session expired");
     return undefined;
   }
   return session;

@@ -5,7 +5,7 @@ import { CouncilChannelRepository } from "@/persistence/drizzle/repository/counc
 import { CouncilPpRepository } from "@/persistence/drizzle/repository/council-pp.repository.ts";
 import { ReceiveUtxoRepository } from "@/persistence/drizzle/repository/receive-utxo.repository.ts";
 import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-account.repository.ts";
-import { LOG } from "@/config/logger.ts";
+import type { Logger } from "@/utils/logger/index.ts";
 import { STELLAR_NETWORK_PASSPHRASE } from "@/config/env.ts";
 import { withSpan } from "@/core/tracing.ts";
 
@@ -24,174 +24,181 @@ const accountRepo = new PayAccountRepository(drizzleClient);
  * a privacy provider URL, and the merchant's receive UTXO public keys so
  * the frontend can build the deposit operation.
  */
-export const prepareInstantHandler = (ctx: Context) =>
-  withSpan("P_PrepareInstant", async (span) => {
-    try {
-      const body = await ctx.request.body.json().catch(() => ({}));
-      const {
-        merchantWallet,
-        amountXlm,
-        customerWallet,
-        assetCode: requestedAsset,
-        payerJurisdiction,
-      } = body;
+export function handlePrepareInstant(
+  deps: { log: Logger },
+): (ctx: Context) => Promise<void> {
+  const log = deps.log.scope("prepareInstant");
 
-      if (!merchantWallet || !amountXlm || !customerWallet) {
-        ctx.response.status = Status.BadRequest;
-        ctx.response.body = {
-          message: "merchantWallet, amountXlm, and customerWallet are required",
-        };
-        return;
-      }
-
-      span.setAttribute("merchant.public_key", merchantWallet);
-      span.setAttribute("customer.public_key", customerWallet);
-
-      const assetCode = requestedAsset || "XLM";
-      span.setAttribute("asset.code", assetCode);
-
-      const amount = parseFloat(amountXlm);
-      if (isNaN(amount) || amount <= 0) {
-        ctx.response.status = Status.BadRequest;
-        ctx.response.body = { message: "amountXlm must be a positive number" };
-        return;
-      }
-
-      // Look up the merchant
-      const merchant = await accountRepo.findByPublicKey(merchantWallet);
-      if (!merchant) {
-        ctx.response.status = Status.NotFound;
-        ctx.response.body = { message: "Merchant not found" };
-        return;
-      }
-
-      // Find a council covering the merchant's jurisdiction
-      let councils;
-      if (payerJurisdiction) {
-        councils = await councilRepo.findByJurisdictionPair(
+  return (ctx) =>
+    withSpan("P_PrepareInstant", async (span) => {
+      log.info("prepareInstant");
+      try {
+        const body = await ctx.request.body.json().catch(() => ({}));
+        const {
+          merchantWallet,
+          amountXlm,
+          customerWallet,
+          assetCode: requestedAsset,
           payerJurisdiction,
-          merchant.jurisdictionCountryCode,
-        );
-        if (councils.length === 0) {
-          ctx.response.status = Status.UnprocessableEntity;
+        } = body;
+
+        if (!merchantWallet || !amountXlm || !customerWallet) {
+          ctx.response.status = Status.BadRequest;
           ctx.response.body = {
             message:
-              `No council available for ${payerJurisdiction} → ${merchant.jurisdictionCountryCode}`,
+              "merchantWallet, amountXlm, and customerWallet are required",
           };
           return;
         }
-      } else {
-        councils = await councilRepo.findByJurisdiction(
-          merchant.jurisdictionCountryCode,
-        );
-        if (councils.length === 0) {
+
+        span.setAttribute("merchant.public_key", merchantWallet);
+        span.setAttribute("customer.public_key", customerWallet);
+        log.debug("merchantWallet", merchantWallet);
+        log.debug("customerWallet", customerWallet);
+
+        const assetCode = requestedAsset || "XLM";
+        span.setAttribute("asset.code", assetCode);
+        log.debug("assetCode", assetCode);
+
+        const amount = parseFloat(amountXlm);
+        if (isNaN(amount) || amount <= 0) {
+          ctx.response.status = Status.BadRequest;
+          ctx.response.body = {
+            message: "amountXlm must be a positive number",
+          };
+          return;
+        }
+
+        // Look up the merchant
+        const merchant = await accountRepo.findByPublicKey(merchantWallet);
+        if (!merchant) {
+          ctx.response.status = Status.NotFound;
+          ctx.response.body = { message: "Merchant not found" };
+          return;
+        }
+
+        // Find a council covering the merchant's jurisdiction
+        let councils;
+        if (payerJurisdiction) {
+          councils = await councilRepo.findByJurisdictionPair(
+            payerJurisdiction,
+            merchant.jurisdictionCountryCode,
+          );
+          if (councils.length === 0) {
+            ctx.response.status = Status.UnprocessableEntity;
+            ctx.response.body = {
+              message:
+                `No council available for ${payerJurisdiction} → ${merchant.jurisdictionCountryCode}`,
+            };
+            return;
+          }
+        } else {
+          councils = await councilRepo.findByJurisdiction(
+            merchant.jurisdictionCountryCode,
+          );
+          if (councils.length === 0) {
+            ctx.response.status = Status.ServiceUnavailable;
+            ctx.response.body = {
+              message: "No council available for this merchant's jurisdiction",
+            };
+            return;
+          }
+        }
+
+        // Find a council that has the requested asset channel
+        let selectedCouncil = null;
+        let selectedChannel = null;
+        for (const c of councils) {
+          const channel = await channelRepo.findByCouncilIdAndAsset(
+            c.id,
+            assetCode,
+          );
+          if (channel) {
+            selectedCouncil = c;
+            selectedChannel = channel;
+            break;
+          }
+        }
+
+        if (!selectedCouncil || !selectedChannel) {
           ctx.response.status = Status.ServiceUnavailable;
           ctx.response.body = {
-            message: "No council available for this merchant's jurisdiction",
+            message:
+              `No ${assetCode} channel available in any council for this jurisdiction`,
           };
           return;
         }
-      }
 
-      // Find a council that has the requested asset channel
-      let selectedCouncil = null;
-      let selectedChannel = null;
-      for (const c of councils) {
-        const channel = await channelRepo.findByCouncilIdAndAsset(
-          c.id,
-          assetCode,
-        );
-        if (channel) {
-          selectedCouncil = c;
-          selectedChannel = channel;
-          break;
+        span.setAttribute("council.id", selectedCouncil.id);
+        span.setAttribute("channel.id", selectedChannel.id);
+
+        // Pick a privacy provider within the council
+        const pps = await ppRepo.findActiveByCouncilId(selectedCouncil.id);
+        if (pps.length === 0) {
+          ctx.response.status = Status.ServiceUnavailable;
+          ctx.response.body = {
+            message: "No privacy provider available in the selected council",
+          };
+          return;
         }
-      }
+        const pp = pps[Math.floor(Math.random() * pps.length)];
+        span.setAttribute("pp.id", pp.id);
 
-      if (!selectedCouncil || !selectedChannel) {
-        ctx.response.status = Status.ServiceUnavailable;
+        // Get merchant's available receive UTXOs (5 for privacy distribution)
+        const merchantUtxos = await utxoRepo.findAvailable(merchantWallet, 5);
+        if (merchantUtxos.length === 0) {
+          ctx.response.status = Status.ServiceUnavailable;
+          ctx.response.body = {
+            message: "Merchant has no available receive addresses",
+          };
+          return;
+        }
+
+        // Reserve the UTXOs so they're not used by concurrent payments
+        await utxoRepo.reserve(merchantUtxos.map((u) => u.id));
+
+        const amountStroops = BigInt(Math.round(amount * 1e7));
+        span.setAttribute("amount.stroops", amountStroops.toString());
+
+        log.debug("amountStroops", amountStroops.toString());
+        log.debug("councilId", selectedCouncil.id);
+        log.debug("channelId", selectedChannel.id);
+        log.debug("ppId", pp.id);
+        log.event("instant payment prepared");
+
         ctx.response.body = {
-          message:
-            `No ${assetCode} channel available in any council for this jurisdiction`,
+          data: {
+            council: {
+              id: selectedCouncil.id,
+              channelAuthId: selectedCouncil.channelAuthId,
+              networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
+            },
+            channel: {
+              id: selectedChannel.id,
+              assetCode: selectedChannel.assetCode,
+              assetContractId: selectedChannel.assetContractId,
+              privacyChannelId: selectedChannel.privacyChannelId,
+            },
+            pp: {
+              url: pp.url,
+              publicKey: pp.publicKey,
+            },
+            opex: {
+              publicKey: merchant.opexPublicKey ?? null,
+              feePct: merchant.feePct ? Number(merchant.feePct) : null,
+            },
+            merchantUtxos: merchantUtxos.map((u) => ({
+              id: u.id,
+              utxoPublicKey: u.utxoPublicKey,
+              derivationIndex: u.derivationIndex,
+            })),
+            amountStroops: amountStroops.toString(),
+          },
         };
-        return;
+      } catch (error) {
+        log.error(error, "failed to prepare instant payment");
+        ctx.response.status = Status.InternalServerError;
+        ctx.response.body = { message: "Failed to prepare payment" };
       }
-
-      span.setAttribute("council.id", selectedCouncil.id);
-      span.setAttribute("channel.id", selectedChannel.id);
-
-      // Pick a privacy provider within the council
-      const pps = await ppRepo.findActiveByCouncilId(selectedCouncil.id);
-      if (pps.length === 0) {
-        ctx.response.status = Status.ServiceUnavailable;
-        ctx.response.body = {
-          message: "No privacy provider available in the selected council",
-        };
-        return;
-      }
-      const pp = pps[Math.floor(Math.random() * pps.length)];
-      span.setAttribute("pp.id", pp.id);
-
-      // Get merchant's available receive UTXOs (5 for privacy distribution)
-      const merchantUtxos = await utxoRepo.findAvailable(merchantWallet, 5);
-      if (merchantUtxos.length === 0) {
-        ctx.response.status = Status.ServiceUnavailable;
-        ctx.response.body = {
-          message: "Merchant has no available receive addresses",
-        };
-        return;
-      }
-
-      // Reserve the UTXOs so they're not used by concurrent payments
-      await utxoRepo.reserve(merchantUtxos.map((u) => u.id));
-
-      const amountStroops = BigInt(Math.round(amount * 1e7));
-      span.setAttribute("amount.stroops", amountStroops.toString());
-
-      LOG.info("Instant payment prepared", {
-        customerWallet,
-        merchantWallet,
-        assetCode,
-        amountStroops: amountStroops.toString(),
-        councilId: selectedCouncil.id,
-        channelId: selectedChannel.id,
-        ppId: pp.id,
-      });
-
-      ctx.response.body = {
-        data: {
-          council: {
-            id: selectedCouncil.id,
-            channelAuthId: selectedCouncil.channelAuthId,
-            networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
-          },
-          channel: {
-            id: selectedChannel.id,
-            assetCode: selectedChannel.assetCode,
-            assetContractId: selectedChannel.assetContractId,
-            privacyChannelId: selectedChannel.privacyChannelId,
-          },
-          pp: {
-            url: pp.url,
-            publicKey: pp.publicKey,
-          },
-          opex: {
-            publicKey: merchant.opexPublicKey ?? null,
-            feePct: merchant.feePct ? Number(merchant.feePct) : null,
-          },
-          merchantUtxos: merchantUtxos.map((u) => ({
-            id: u.id,
-            utxoPublicKey: u.utxoPublicKey,
-            derivationIndex: u.derivationIndex,
-          })),
-          amountStroops: amountStroops.toString(),
-        },
-      };
-    } catch (error) {
-      LOG.error("Failed to prepare instant payment", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      ctx.response.status = Status.InternalServerError;
-      ctx.response.body = { message: "Failed to prepare payment" };
-    }
-  });
+    });
+}

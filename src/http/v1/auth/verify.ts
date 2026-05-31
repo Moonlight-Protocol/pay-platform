@@ -1,7 +1,7 @@
 import { type Context, Status } from "@oak/oak";
 import { verifyWalletChallenge } from "@/core/service/auth/wallet-auth.ts";
 import generateJwt from "@/core/service/auth/generate-jwt.ts";
-import { LOG } from "@/config/logger.ts";
+import type { Logger } from "@/utils/logger/index.ts";
 import { withSpan } from "@/core/tracing.ts";
 
 /**
@@ -13,42 +13,50 @@ import { withSpan } from "@/core/tracing.ts";
  * is authenticated, but the user is not yet "in" Moonlight Pay until they
  * complete signup via POST /api/v1/account.
  */
-export const postVerifyHandler = (ctx: Context) =>
-  withSpan("P_AuthVerify", async (span) => {
-    try {
-      const body = await ctx.request.body.json();
-      const { nonce, signature, publicKey } = body;
+export function handlePostVerify(
+  deps: { log: Logger },
+): (ctx: Context) => Promise<void> {
+  const log = deps.log.scope("postVerify");
 
-      if (!nonce || !signature || !publicKey) {
-        ctx.response.status = Status.BadRequest;
+  return (ctx) =>
+    withSpan("P_AuthVerify", async (span) => {
+      log.info("postVerify");
+      try {
+        const body = await ctx.request.body.json();
+        const { nonce, signature, publicKey } = body;
+
+        if (!nonce || !signature || !publicKey) {
+          ctx.response.status = Status.BadRequest;
+          ctx.response.body = {
+            message: "nonce, signature, and publicKey are required",
+          };
+          return;
+        }
+
+        span.setAttribute("wallet.public_key", publicKey);
+        log.debug("publicKey", publicKey);
+
+        const { token } = await verifyWalletChallenge(
+          nonce,
+          signature,
+          publicKey,
+          {
+            generateToken: (subject, sessionId) =>
+              generateJwt(subject, sessionId),
+          },
+          { log },
+        );
+
+        log.event("authentication successful");
+        ctx.response.status = Status.OK;
         ctx.response.body = {
-          message: "nonce, signature, and publicKey are required",
+          message: "Authentication successful",
+          data: { token },
         };
-        return;
+      } catch (error) {
+        log.error(error, "wallet auth failed");
+        ctx.response.status = Status.Unauthorized;
+        ctx.response.body = { message: "Authentication failed" };
       }
-
-      span.setAttribute("wallet.public_key", publicKey);
-
-      const { token } = await verifyWalletChallenge(
-        nonce,
-        signature,
-        publicKey,
-        {
-          generateToken: (subject, sessionId) =>
-            generateJwt(subject, sessionId),
-        },
-      );
-
-      ctx.response.status = Status.OK;
-      ctx.response.body = {
-        message: "Authentication successful",
-        data: { token },
-      };
-    } catch (error) {
-      LOG.warn("Wallet auth failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      ctx.response.status = Status.Unauthorized;
-      ctx.response.body = { message: "Authentication failed" };
-    }
-  });
+    });
+}

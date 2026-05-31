@@ -1,7 +1,7 @@
 import { type Context, Status } from "@oak/oak";
 import { drizzleClient } from "@/persistence/drizzle/config.ts";
 import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-account.repository.ts";
-import { LOG } from "@/config/logger.ts";
+import type { Logger } from "@/utils/logger/index.ts";
 import type { JwtSessionData } from "@/http/middleware/auth/index.ts";
 import {
   validateDisplayName,
@@ -20,77 +20,85 @@ const accountRepo = new PayAccountRepository(drizzleClient);
  *
  * Body: { email, jurisdictionCountryCode, displayName? }
  */
-export const postAccountHandler = async (ctx: Context) => {
-  try {
-    const session = ctx.state.session as JwtSessionData;
-    const walletPublicKey = session.sub;
+export function handlePostAccount(
+  deps: { log: Logger },
+): (ctx: Context) => Promise<void> {
+  const log = deps.log.scope("postAccount");
 
-    const body = await ctx.request.body.json().catch(() => ({}));
-    const { email, jurisdictionCountryCode, displayName } = body;
+  return async (ctx) => {
+    log.info("postAccount");
+    try {
+      const session = ctx.state.session as JwtSessionData;
+      const walletPublicKey = session.sub;
+      log.debug("walletPublicKey", walletPublicKey);
 
-    const emailErr = validateEmail(email);
-    if (emailErr) {
-      ctx.response.status = Status.BadRequest;
-      ctx.response.body = { message: emailErr };
-      return;
-    }
-    const jurisdictionErr = validateJurisdiction(jurisdictionCountryCode);
-    if (jurisdictionErr) {
-      ctx.response.status = Status.BadRequest;
-      ctx.response.body = { message: jurisdictionErr };
-      return;
-    }
-    const displayNameErr = validateDisplayName(displayName);
-    if (displayNameErr) {
-      ctx.response.status = Status.BadRequest;
-      ctx.response.body = { message: displayNameErr };
-      return;
-    }
+      const body = await ctx.request.body.json().catch(() => ({}));
+      const { email, jurisdictionCountryCode, displayName } = body;
 
-    // Idempotent: if the account exists, return it.
-    const existing = await accountRepo.findByPublicKey(walletPublicKey);
-    if (existing) {
-      await accountRepo.updateLastSeen(walletPublicKey);
-      ctx.response.status = Status.OK;
+      const emailErr = validateEmail(email);
+      if (emailErr) {
+        ctx.response.status = Status.BadRequest;
+        ctx.response.body = { message: emailErr };
+        return;
+      }
+      const jurisdictionErr = validateJurisdiction(jurisdictionCountryCode);
+      if (jurisdictionErr) {
+        ctx.response.status = Status.BadRequest;
+        ctx.response.body = { message: jurisdictionErr };
+        return;
+      }
+      const displayNameErr = validateDisplayName(displayName);
+      if (displayNameErr) {
+        ctx.response.status = Status.BadRequest;
+        ctx.response.body = { message: displayNameErr };
+        return;
+      }
+
+      // Idempotent: if the account exists, return it.
+      const existing = await accountRepo.findByPublicKey(walletPublicKey);
+      if (existing) {
+        await accountRepo.updateLastSeen(walletPublicKey);
+        ctx.response.status = Status.OK;
+        ctx.response.body = {
+          message: "Account already exists",
+          data: formatAccount(existing),
+        };
+        return;
+      }
+
+      const now = new Date();
+      const created = await accountRepo.create({
+        walletPublicKey,
+        email: (email as string).trim(),
+        jurisdictionCountryCode: (jurisdictionCountryCode as string)
+          .toUpperCase(),
+        displayName: typeof displayName === "string"
+          ? displayName.trim()
+          : null,
+        lastSeenAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      log.event("pay account created");
+
+      ctx.response.status = Status.Created;
       ctx.response.body = {
-        message: "Account already exists",
-        data: formatAccount(existing),
+        message: "Account created",
+        data: formatAccount(created),
       };
-      return;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        ctx.response.status = Status.BadRequest;
+        ctx.response.body = { message: "Invalid request body" };
+        return;
+      }
+      log.error(error, "failed to create account");
+      ctx.response.status = Status.InternalServerError;
+      ctx.response.body = { message: "Failed to create account" };
     }
-
-    const now = new Date();
-    const created = await accountRepo.create({
-      walletPublicKey,
-      email: (email as string).trim(),
-      jurisdictionCountryCode: (jurisdictionCountryCode as string)
-        .toUpperCase(),
-      displayName: typeof displayName === "string" ? displayName.trim() : null,
-      lastSeenAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    LOG.info("Pay account created", { walletPublicKey });
-
-    ctx.response.status = Status.Created;
-    ctx.response.body = {
-      message: "Account created",
-      data: formatAccount(created),
-    };
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      ctx.response.status = Status.BadRequest;
-      ctx.response.body = { message: "Invalid request body" };
-      return;
-    }
-    LOG.error("Failed to create account", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    ctx.response.status = Status.InternalServerError;
-    ctx.response.body = { message: "Failed to create account" };
-  }
-};
+  };
+}
 
 function formatAccount(row: {
   walletPublicKey: string;

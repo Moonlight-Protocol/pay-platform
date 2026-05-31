@@ -1,6 +1,6 @@
 import { Keypair } from "stellar-sdk";
 import { Buffer } from "buffer";
-import { LOG } from "@/config/logger.ts";
+import type { Logger } from "@/utils/logger/index.ts";
 import { withSpan } from "@/core/tracing.ts";
 
 const MAX_PENDING_CHALLENGES = 1000;
@@ -18,15 +18,22 @@ interface PendingChallenge {
 
 const pendingChallenges = new Map<string, PendingChallenge>();
 
-export function createWalletChallenge(publicKey: string): { nonce: string } {
-  cleanupExpiredChallenges();
+export function createWalletChallenge(
+  publicKey: string,
+  deps: { log: Logger },
+): { nonce: string } {
+  const log = deps.log.scope("createWalletChallenge");
+  log.info("createWalletChallenge");
+  log.debug("publicKey", publicKey);
+
+  cleanupExpiredChallenges(deps);
   if (pendingChallenges.size >= MAX_PENDING_CHALLENGES) {
     throw new Error("Too many pending challenges. Try again later.");
   }
   const nonceBytes = crypto.getRandomValues(new Uint8Array(32));
   const nonce = btoa(String.fromCharCode(...nonceBytes));
   pendingChallenges.set(nonce, { nonce, publicKey, createdAt: Date.now() });
-  LOG.debug("Wallet challenge created", { publicKey });
+  log.event("wallet challenge created");
   return { nonce };
 }
 
@@ -39,7 +46,12 @@ export function verifyWalletChallenge(
   signature: string,
   publicKey: string,
   config: WalletAuthConfig,
+  deps: { log: Logger },
 ): Promise<{ token: string }> {
+  const log = deps.log.scope("verifyWalletChallenge");
+  log.info("verifyWalletChallenge");
+  log.debug("publicKey", publicKey);
+
   return withSpan("WalletAuth.verify", async (span) => {
     span.setAttribute("wallet.public_key", publicKey);
     const challenge = pendingChallenges.get(nonce);
@@ -112,16 +124,21 @@ export function verifyWalletChallenge(
     ).join("");
     const token = await config.generateToken(publicKey, hashedSessionId);
 
-    LOG.info("Wallet auth successful", { publicKey });
+    log.event("wallet auth successful");
     return { token };
   });
 }
 
-function cleanupExpiredChallenges(): void {
+function cleanupExpiredChallenges(deps: { log: Logger }): void {
+  const log = deps.log.scope("cleanupExpiredChallenges");
+  log.info("cleanupExpiredChallenges");
   const now = Date.now();
+  let removed = 0;
   for (const [nonce, challenge] of pendingChallenges) {
     if (now - challenge.createdAt > challengeTtlMs) {
       pendingChallenges.delete(nonce);
+      removed++;
     }
   }
+  log.debug("removed", removed);
 }
