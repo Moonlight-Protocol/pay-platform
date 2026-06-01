@@ -142,7 +142,7 @@ export function handleSubmitInstant(
         // Submit the bundle to provider-platform
         log.event("submitting bundle to provider-platform");
         const bundleRes = await fetch(
-          `${pp.url}/api/v1/providers/${pp.publicKey}/bundles`,
+          `${pp.url}/api/v1/providers/${pp.publicKey}/entity/bundles`,
           {
             method: "POST",
             headers: {
