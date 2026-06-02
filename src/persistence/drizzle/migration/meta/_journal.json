@@ -57,6 +57,13 @@
       "when": 1778073633927,
       "tag": "0007_add_waitlist_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1780000000000,
+      "tag": "0008_drop_receive_utxos_add_delegation_key",
+      "breakpoints": true
     }
   ]
 }

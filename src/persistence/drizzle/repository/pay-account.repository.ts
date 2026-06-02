@@ -46,4 +46,12 @@ export class PayAccountRepository {
       .set({ lastSeenAt: new Date() })
       .where(eq(payAccount.walletPublicKey, walletPublicKey));
   }
+
+  async deleteByPublicKey(walletPublicKey: string): Promise<boolean> {
+    const rows = await this.db
+      .delete(payAccount)
+      .where(eq(payAccount.walletPublicKey, walletPublicKey))
+      .returning({ walletPublicKey: payAccount.walletPublicKey });
+    return rows.length > 0;
+  }
 }

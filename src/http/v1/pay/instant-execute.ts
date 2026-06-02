@@ -12,11 +12,12 @@ import { drizzleClient } from "@/persistence/drizzle/config.ts";
 import { CouncilRepository } from "@/persistence/drizzle/repository/council.repository.ts";
 import { CouncilChannelRepository } from "@/persistence/drizzle/repository/council-channel.repository.ts";
 import { CouncilPpRepository } from "@/persistence/drizzle/repository/council-pp.repository.ts";
-import { ReceiveUtxoRepository } from "@/persistence/drizzle/repository/receive-utxo.repository.ts";
 import { TransactionRepository } from "@/persistence/drizzle/repository/transaction.repository.ts";
 import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-account.repository.ts";
 import { decryptSk } from "@/core/crypto/encrypt-sk.ts";
 import { getProviderJwt } from "@/core/service/provider-auth.ts";
+import { getChannelClient } from "@/core/channel-client/index.ts";
+import { validateReceiveDestinations } from "@/core/service/utxo/utxo-balance.ts";
 import {
   SERVICE_AUTH_SECRET,
   STELLAR_NETWORK_PASSPHRASE,
@@ -28,29 +29,9 @@ import { withSpan } from "@/core/tracing.ts";
 const councilRepo = new CouncilRepository(drizzleClient);
 const channelRepo = new CouncilChannelRepository(drizzleClient);
 const ppRepo = new CouncilPpRepository(drizzleClient);
-const utxoRepo = new ReceiveUtxoRepository(drizzleClient);
 const txRepo = new TransactionRepository(drizzleClient);
 const accountRepo = new PayAccountRepository(drizzleClient);
 
-/**
- * POST /api/v1/pay/instant/execute
- *
- * Instant payment flow: the customer has sent a standard Stellar payment
- * to the merchant's OpEx address. Pay-platform:
- *   1. Verifies the payment on-chain
- *   2. Deposits (SAC transfer) from OpEx to the privacy channel
- *   3. Builds the MLXDR bundle (CREATE + SPEND) and submits to provider-platform
- *   4. Records the transaction
- *
- * Body: {
- *   customerPaymentHash — Stellar tx hash of customer's payment to OpEx
- *   merchantWallet      — merchant's Moonlight Pay wallet
- *   amountStroops       — amount the customer sent (in stroops)
- *   assetCode?          — defaults to "XLM"
- *   description?        — optional payment description
- *   merchantUtxoIds     — reserved UTXO IDs from prepare
- * }
- */
 export function handleExecuteInstant(
   deps: { log: Logger },
 ): (ctx: Context) => Promise<void> {
@@ -59,7 +40,6 @@ export function handleExecuteInstant(
   return (ctx) =>
     withSpan("P_ExecuteInstant", async (span) => {
       log.info("executeInstant");
-      let merchantUtxoIds: string[] | undefined;
 
       try {
         const body = await ctx.request.body.json().catch(() => ({}));
@@ -69,14 +49,25 @@ export function handleExecuteInstant(
           amountStroops: amountStr,
           assetCode: requestedAsset,
           description,
+          merchantUtxoIndexes,
         } = body;
-        merchantUtxoIds = body.merchantUtxoIds;
 
         if (!customerPaymentHash || !merchantWallet || !amountStr) {
           ctx.response.status = Status.BadRequest;
           ctx.response.body = {
             message:
               "customerPaymentHash, merchantWallet, and amountStroops are required",
+          };
+          return;
+        }
+        if (
+          !Array.isArray(merchantUtxoIndexes) ||
+          merchantUtxoIndexes.length === 0 ||
+          !merchantUtxoIndexes.every((i: unknown) => typeof i === "number")
+        ) {
+          ctx.response.status = Status.BadRequest;
+          ctx.response.body = {
+            message: "merchantUtxoIndexes must be a non-empty array of numbers",
           };
           return;
         }
@@ -88,12 +79,6 @@ export function handleExecuteInstant(
         span.setAttribute("amount.stroops", amountStroops.toString());
         span.setAttribute("customer.payment_hash", customerPaymentHash);
 
-        log.debug("merchantWallet", merchantWallet);
-        log.debug("assetCode", assetCode);
-        log.debug("amountStroops", amountStroops.toString());
-        log.debug("customerPaymentHash", customerPaymentHash);
-
-        // ─── 1. Look up merchant and OpEx ──────────────────────
         const merchant = await accountRepo.findByPublicKey(merchantWallet);
         if (!merchant) {
           ctx.response.status = Status.NotFound;
@@ -107,9 +92,15 @@ export function handleExecuteInstant(
           };
           return;
         }
+        if (!merchant.encryptedDelegationKey) {
+          ctx.response.status = Status.UnprocessableEntity;
+          ctx.response.body = {
+            message: "Merchant has not finished onboarding",
+          };
+          return;
+        }
         const feePct = merchant.feePct ? Number(merchant.feePct) : 0;
 
-        // ─── 2. Find council + channel + PP ────────────────────
         const councils = await councilRepo.findByJurisdiction(
           merchant.jurisdictionCountryCode,
         );
@@ -129,7 +120,6 @@ export function handleExecuteInstant(
         if (!selectedCouncil || !selectedChannel) {
           ctx.response.status = Status.ServiceUnavailable;
           ctx.response.body = { message: `No ${assetCode} channel available` };
-          if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
           return;
         }
         span.setAttribute("council.id", selectedCouncil.id);
@@ -139,13 +129,11 @@ export function handleExecuteInstant(
         if (pps.length === 0) {
           ctx.response.status = Status.ServiceUnavailable;
           ctx.response.body = { message: "No privacy provider available" };
-          if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
           return;
         }
         const pp = pps[Math.floor(Math.random() * pps.length)];
         span.setAttribute("pp.id", pp.id);
 
-        // ─── 3. Verify customer payment on-chain ───────────────
         log.event("verifying customer payment on-chain");
         const horizonUrl = STELLAR_RPC_URL.includes("/soroban/rpc")
           ? STELLAR_RPC_URL.replace("/soroban/rpc", "")
@@ -159,7 +147,6 @@ export function handleExecuteInstant(
           ctx.response.body = {
             message: "Customer payment not found on-chain",
           };
-          if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
           return;
         }
         const txOps = await txRes.json();
@@ -182,7 +169,6 @@ export function handleExecuteInstant(
           ctx.response.body = {
             message: "No payment to OpEx address found in transaction",
           };
-          if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
           return;
         }
         const paidAmount = paymentOp.amount ?? paymentOp.starting_balance ??
@@ -194,19 +180,37 @@ export function handleExecuteInstant(
             message:
               `Insufficient payment: expected ${amountStroops}, got ${paidStroops}`,
           };
-          if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
           return;
         }
         log.event("customer payment verified");
 
-        // ─── 4. Calculate net amount ───────────────────────────
         const feeStroops = amountStroops * BigInt(Math.round(feePct * 100)) /
           10000n;
         const netStroops = amountStroops - feeStroops;
         span.setAttribute("net.stroops", netStroops.toString());
         span.setAttribute("fee.stroops", feeStroops.toString());
 
-        // ─── 5. Decrypt OpEx SK and deposit into channel ───────
+        const utxoRootBase64 = await decryptSk(
+          merchant.encryptedDelegationKey,
+          SERVICE_AUTH_SECRET,
+        );
+        const utxoRoot = Uint8Array.from(
+          atob(utxoRootBase64),
+          (c) => c.charCodeAt(0),
+        );
+
+        const channelClient = getChannelClient(
+          selectedChannel.privacyChannelId,
+          selectedCouncil.channelAuthId,
+          selectedChannel.assetContractId,
+        );
+        const merchantDestinations = await validateReceiveDestinations(
+          channelClient,
+          utxoRoot,
+          merchantUtxoIndexes,
+          { log },
+        );
+
         log.event("depositing OpEx to privacy channel");
         const opexSk = await decryptSk(
           merchant.encryptedOpexSk,
@@ -254,27 +258,17 @@ export function handleExecuteInstant(
           }
           await new Promise((r) => setTimeout(r, 2000));
         }
-
-        log.debug("txHash", depositResult.hash);
         log.event("deposit confirmed on-chain");
-
-        // ─── 6. Build MLXDR bundle ─────────────────────────────
-        const merchantUtxos = await utxoRepo.findByIds(
-          Array.isArray(merchantUtxoIds) ? merchantUtxoIds : [],
-        );
 
         const merchantAmounts = partitionAmount(
           netStroops,
-          merchantUtxos.length,
+          merchantDestinations.publicKeys.length,
         );
-        const merchantCreateOps = merchantUtxos.map((u, i) =>
-          MoonlightOperation.create(
-            Uint8Array.from(atob(u.utxoPublicKey), (c) => c.charCodeAt(0)),
-            merchantAmounts[i],
-          )
+        const merchantCreateOps = merchantDestinations.publicKeys.map((pk, i) =>
+          MoonlightOperation.create(pk, merchantAmounts[i])
         );
 
-        const tempCount = merchantUtxos.length;
+        const tempCount = merchantDestinations.publicKeys.length;
         const tempKeypairs: Array<
           { publicKey: Uint8Array; privateKey: Uint8Array }
         > = [];
@@ -338,7 +332,6 @@ export function handleExecuteInstant(
           ...merchantCreateOps.map((op) => op.toMLXDR()),
         ];
 
-        // ─── 7. Submit bundle to provider-platform ─────────────
         log.event("submitting bundle to provider-platform");
         const providerJwt = await getProviderJwt(pp.url, { log });
         const bundleRes = await fetch(
@@ -368,18 +361,12 @@ export function handleExecuteInstant(
           ctx.response.body = {
             message: "Payment processing failed — provider rejected the bundle",
           };
-          if (merchantUtxoIds) await utxoRepo.release(merchantUtxoIds);
           return;
         }
 
         const bundleData = await bundleRes.json().catch(() => ({}));
         const bundleId = bundleData?.data?.operationsBundleId ?? null;
         if (bundleId) span.setAttribute("bundle.id", bundleId);
-
-        // ─── 8. Record transactions ────────────────────────────
-        if (Array.isArray(merchantUtxoIds) && merchantUtxoIds.length > 0) {
-          await utxoRepo.markSpent(merchantUtxoIds);
-        }
 
         const inTx = await txRepo.create({
           walletPublicKey: merchantWallet,
@@ -394,10 +381,6 @@ export function handleExecuteInstant(
           completedAt: new Date(),
         });
 
-        log.debug("netStroops", netStroops.toString());
-        log.debug("feeStroops", feeStroops.toString());
-        log.debug("bundleId", bundleId);
-        log.debug("txId", inTx.id);
         log.event("instant payment completed");
 
         ctx.response.body = {
@@ -411,16 +394,9 @@ export function handleExecuteInstant(
         log.error(error, "failed to execute instant payment");
         ctx.response.status = Status.InternalServerError;
         ctx.response.body = { message: "Failed to process payment" };
-        if (merchantUtxoIds) {
-          try {
-            await utxoRepo.release(merchantUtxoIds);
-          } catch { /* best effort */ }
-        }
       }
     });
 }
-
-// ─── Helpers ───────────────────────────────────────────────────
 
 function partitionAmount(total: bigint, parts: number): bigint[] {
   if (parts <= 0) return [];

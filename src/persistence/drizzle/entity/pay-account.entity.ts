@@ -19,6 +19,7 @@ export const payAccount = pgTable("pay_accounts", {
   opexPublicKey: text("opex_public_key"),
   encryptedOpexSk: text("encrypted_opex_sk"),
   feePct: numeric("fee_pct", { precision: 5, scale: 2 }),
+  encryptedDelegationKey: text("encrypted_delegation_key"),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   ...createBaseColumns(),
 });
