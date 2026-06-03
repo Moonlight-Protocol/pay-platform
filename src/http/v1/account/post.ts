@@ -106,7 +106,6 @@ function formatAccount(row: {
   jurisdictionCountryCode: string;
   displayName: string | null;
   opexPublicKey: string | null;
-  feePct: string | null;
   lastSeenAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -117,7 +116,6 @@ function formatAccount(row: {
     jurisdictionCountryCode: row.jurisdictionCountryCode,
     displayName: row.displayName,
     opexPublicKey: row.opexPublicKey,
-    feePct: row.feePct ? Number(row.feePct) : null,
     lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

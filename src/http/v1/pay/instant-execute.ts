@@ -278,10 +278,22 @@ export function handleExecuteInstant(
           MoonlightOperation.create(pk, merchantAmounts[i])
         );
 
-        const depositOp = MoonlightOperation.deposit(
+        // Sign the deposit op with the OpEx Ed25519 key — browser-wallet's
+        // deposit pattern requires the depositor's signature on the deposit
+        // op (separate from the SAC transfer that moves XLM).
+        const expirationLedger = 999_999_999;
+        const depositOp = await MoonlightOperation.deposit(
           opexKeypair.publicKey() as `G${string}`,
           depositTotalStroops,
-        ).addConditions(merchantCreateOps.map((op) => op.toCondition()));
+        )
+          .addConditions(merchantCreateOps.map((op) => op.toCondition()))
+          .signWithEd25519(
+            opexKeypair,
+            expirationLedger,
+            selectedChannel.privacyChannelId as `C${string}`,
+            selectedChannel.assetContractId as `C${string}`,
+            networkPassphrase,
+          );
 
         const operationsMLXDR = [
           depositOp.toMLXDR(),

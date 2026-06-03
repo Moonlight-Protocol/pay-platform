@@ -209,7 +209,6 @@ export function handlePrepareInstant(
             },
             opex: {
               publicKey: merchant.opexPublicKey ?? null,
-              feePct: merchant.feePct ? Number(merchant.feePct) : null,
             },
             merchantUtxos,
             amountStroops: amountStroops.toString(),

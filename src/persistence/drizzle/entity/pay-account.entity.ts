@@ -1,4 +1,4 @@
-import { numeric, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { createBaseColumns } from "@/persistence/drizzle/entity/base.entity.ts";
 
 /**
@@ -18,7 +18,6 @@ export const payAccount = pgTable("pay_accounts", {
   displayName: text("display_name"),
   opexPublicKey: text("opex_public_key"),
   encryptedOpexSk: text("encrypted_opex_sk"),
-  feePct: numeric("fee_pct", { precision: 5, scale: 2 }),
   encryptedDelegationKey: text("encrypted_delegation_key"),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   ...createBaseColumns(),
