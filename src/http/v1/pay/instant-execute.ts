@@ -99,9 +99,6 @@ export function handleExecuteInstant(
           };
           return;
         }
-        // Merchant fee concept is being reworked — hardcode to 0 for now.
-        const feePct = 0;
-
         const councils = await councilRepo.findByJurisdiction(
           merchant.jurisdictionCountryCode,
         );
@@ -185,12 +182,6 @@ export function handleExecuteInstant(
         }
         log.event("customer payment verified");
 
-        const feeStroops = amountStroops * BigInt(Math.round(feePct * 100)) /
-          10000n;
-        const netStroops = amountStroops - feeStroops;
-        span.setAttribute("net.stroops", netStroops.toString());
-        span.setAttribute("fee.stroops", feeStroops.toString());
-
         const utxoRootBase64 = await decryptSk(
           merchant.encryptedDelegationKey,
           SERVICE_AUTH_SECRET,
@@ -225,10 +216,10 @@ export function handleExecuteInstant(
         });
 
         // The SAC transfer to the channel must match the bundle's deposit op
-        // (netStroops + BUNDLE_FEE). Otherwise the channel rejects the bundle
+        // (amountStroops + BUNDLE_FEE). Otherwise the channel rejects the bundle
         // for inflow/outflow mismatch.
         const BUNDLE_FEE = 500_000n;
-        const depositTotalStroops = netStroops + BUNDLE_FEE;
+        const depositTotalStroops = amountStroops + BUNDLE_FEE;
         const opexAccount = await server.getAccount(opexKeypair.publicKey());
         const sacContract = new Contract(selectedChannel.assetContractId);
         const depositTx = new TransactionBuilder(opexAccount, {
@@ -267,11 +258,11 @@ export function handleExecuteInstant(
         log.event("deposit confirmed on-chain");
 
         // Bundle is shaped like browser-wallet's deposit flow:
-        //   deposit(opex, netStroops + BUNDLE_FEE)  +  merchant CREATEs(netStroops)
+        //   deposit(opex, amountStroops + BUNDLE_FEE)  +  merchant CREATEs(amountStroops)
         // No temp-hop. provider-platform's classifier sees inflows = deposit,
         // outflows = merchant creates, fee = BUNDLE_FEE (positive).
         const merchantAmounts = partitionAmount(
-          netStroops,
+          amountStroops,
           merchantDestinations.publicKeys.length,
         );
         const merchantCreateOps = merchantDestinations.publicKeys.map((pk, i) =>
@@ -339,13 +330,53 @@ export function handleExecuteInstant(
         const bundleId = bundleData?.data?.operationsBundleId ?? null;
         if (bundleId) span.setAttribute("bundle.id", bundleId);
 
+        // Wait for the bundle to actually settle on chain. provider-platform's
+        // mempool → executor → verifier pipeline is async (5 s executor tick,
+        // 10 s verifier tick), so the bundle status doesn't reach COMPLETED
+        // until well after the POST returns. Until it COMPLETEs, the merchant's
+        // chain-derived balance is 0 — returning here without waiting means
+        // the caller sees "payment completed" but on-chain state is empty.
+        // Pattern matches local-dev's lib/client/bundle.ts:waitForBundle.
+        if (bundleId) {
+          log.event("waiting for bundle settlement");
+          const bundlePollUrl =
+            `${pp.url}/api/v1/providers/${pp.publicKey}/entity/bundles/${bundleId}`;
+          const pollDeadline = Date.now() + 120_000;
+          let settled = false;
+          while (Date.now() < pollDeadline) {
+            await new Promise((r) => setTimeout(r, 5_000));
+            const pollRes = await fetch(bundlePollUrl, {
+              headers: { "Authorization": `Bearer ${providerJwt}` },
+            });
+            if (!pollRes.ok) {
+              if (pollRes.status === 429) continue;
+              throw new Error(
+                `Bundle poll failed: ${pollRes.status} ${await pollRes.text()}`,
+              );
+            }
+            const pollData = await pollRes.json().catch(() => ({}));
+            const bundleStatus = pollData?.data?.status;
+            log.debug("bundleStatus", String(bundleStatus));
+            if (bundleStatus === "COMPLETED") {
+              settled = true;
+              break;
+            }
+            if (bundleStatus === "FAILED" || bundleStatus === "EXPIRED") {
+              throw new Error(`Bundle ${bundleId} ${bundleStatus}`);
+            }
+          }
+          if (!settled) {
+            throw new Error(`Bundle ${bundleId} did not settle within 120 s`);
+          }
+          log.event("bundle settled on chain");
+        }
+
         const inTx = await txRepo.create({
           walletPublicKey: merchantWallet,
           direction: "IN",
           status: "COMPLETED",
           method: "CRYPTO_INSTANT",
-          amountStroops: netStroops,
-          feeStroops,
+          amountStroops: amountStroops,
           counterparty: null,
           description: description ?? null,
           bundleId,
