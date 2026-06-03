@@ -415,4 +415,3 @@ function partitionAmount(total: bigint, parts: number): bigint[] {
   result.push(remaining);
   return result;
 }
-
