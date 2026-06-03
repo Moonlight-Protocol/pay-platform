@@ -99,7 +99,8 @@ export function handleExecuteInstant(
           };
           return;
         }
-        const feePct = merchant.feePct ? Number(merchant.feePct) : 0;
+        // Merchant fee concept is being reworked — hardcode to 0 for now.
+        const feePct = 0;
 
         const councils = await councilRepo.findByJurisdiction(
           merchant.jurisdictionCountryCode,
@@ -223,6 +224,11 @@ export function handleExecuteInstant(
           allowHttp: STELLAR_RPC_URL.startsWith("http://"),
         });
 
+        // The SAC transfer to the channel must match the bundle's deposit op
+        // (netStroops + BUNDLE_FEE). Otherwise the channel rejects the bundle
+        // for inflow/outflow mismatch.
+        const BUNDLE_FEE = 500_000n;
+        const depositTotalStroops = netStroops + BUNDLE_FEE;
         const opexAccount = await server.getAccount(opexKeypair.publicKey());
         const sacContract = new Contract(selectedChannel.assetContractId);
         const depositTx = new TransactionBuilder(opexAccount, {
@@ -234,7 +240,7 @@ export function handleExecuteInstant(
               "transfer",
               new Address(opexKeypair.publicKey()).toScVal(),
               new Address(selectedChannel.privacyChannelId).toScVal(),
-              nativeToScVal(netStroops, { type: "i128" }),
+              nativeToScVal(depositTotalStroops, { type: "i128" }),
             ),
           )
           .setTimeout(300)
@@ -260,6 +266,10 @@ export function handleExecuteInstant(
         }
         log.event("deposit confirmed on-chain");
 
+        // Bundle is shaped like browser-wallet's deposit flow:
+        //   deposit(opex, netStroops + BUNDLE_FEE)  +  merchant CREATEs(netStroops)
+        // No temp-hop. provider-platform's classifier sees inflows = deposit,
+        // outflows = merchant creates, fee = BUNDLE_FEE (positive).
         const merchantAmounts = partitionAmount(
           netStroops,
           merchantDestinations.publicKeys.length,
@@ -268,67 +278,13 @@ export function handleExecuteInstant(
           MoonlightOperation.create(pk, merchantAmounts[i])
         );
 
-        const tempCount = merchantDestinations.publicKeys.length;
-        const tempKeypairs: Array<
-          { publicKey: Uint8Array; privateKey: Uint8Array }
-        > = [];
-        for (let i = 0; i < tempCount; i++) {
-          const seed = crypto.getRandomValues(new Uint8Array(32));
-          tempKeypairs.push(await deriveP256Keypair(seed));
-        }
-
-        const tempAmounts = partitionAmount(netStroops, tempCount);
-        const tempCreateOps = tempKeypairs.map((kp, i) =>
-          MoonlightOperation.create(kp.publicKey, tempAmounts[i])
-        );
-
-        const expirationLedger = 999999999;
-
         const depositOp = MoonlightOperation.deposit(
           opexKeypair.publicKey() as `G${string}`,
-          netStroops,
-        ).addConditions(tempCreateOps.map((op) => op.toCondition()));
-
-        const spendOps = [];
-        for (let i = 0; i < tempKeypairs.length; i++) {
-          const spendOp = MoonlightOperation.spend(tempKeypairs[i].publicKey);
-          for (const merchantCreate of merchantCreateOps) {
-            spendOp.addCondition(merchantCreate.toCondition());
-          }
-          // deno-lint-ignore no-explicit-any
-          const utxoAdapter: any = {
-            publicKey: tempKeypairs[i].publicKey,
-            signPayload: async (hash: Uint8Array) => {
-              const hashBuf = new ArrayBuffer(hash.length);
-              new Uint8Array(hashBuf).set(hash);
-              const pkcs8 = buildPkcs8P256(tempKeypairs[i].privateKey);
-              const key = await crypto.subtle.importKey(
-                "pkcs8",
-                pkcs8,
-                { name: "ECDSA", namedCurve: "P-256" },
-                false,
-                ["sign"],
-              );
-              const sig = await crypto.subtle.sign(
-                { name: "ECDSA", hash: "SHA-256" },
-                key,
-                hashBuf,
-              );
-              return new Uint8Array(sig);
-            },
-          };
-          await spendOp.signWithUTXO(
-            utxoAdapter,
-            selectedChannel.privacyChannelId as `C${string}`,
-            expirationLedger,
-          );
-          spendOps.push(spendOp);
-        }
+          depositTotalStroops,
+        ).addConditions(merchantCreateOps.map((op) => op.toCondition()));
 
         const operationsMLXDR = [
           depositOp.toMLXDR(),
-          ...tempCreateOps.map((op) => op.toMLXDR()),
-          ...spendOps.map((op) => op.toMLXDR()),
           ...merchantCreateOps.map((op) => op.toMLXDR()),
         ];
 
@@ -414,77 +370,3 @@ function partitionAmount(total: bigint, parts: number): bigint[] {
   return result;
 }
 
-async function deriveP256Keypair(
-  seed: Uint8Array,
-): Promise<{ publicKey: Uint8Array; privateKey: Uint8Array }> {
-  const seedBuf = new ArrayBuffer(seed.length);
-  new Uint8Array(seedBuf).set(seed);
-  const expandKey = await crypto.subtle.importKey(
-    "raw",
-    seedBuf,
-    "HKDF",
-    false,
-    ["deriveBits"],
-  );
-  const expanded = await crypto.subtle.deriveBits(
-    {
-      name: "HKDF",
-      hash: "SHA-256",
-      salt: new Uint8Array(0),
-      info: new TextEncoder().encode("moonlight-p256"),
-    },
-    expandKey,
-    384,
-  );
-  const privateKeyBytes = new Uint8Array(expanded).slice(0, 32);
-
-  const { p256 } = await import("@noble/curves/p256");
-  const publicKey = p256.ProjectivePoint.fromPrivateKey(privateKeyBytes)
-    .toRawBytes(false);
-
-  return { publicKey: new Uint8Array(publicKey), privateKey: privateKeyBytes };
-}
-
-function buildPkcs8P256(rawPrivateKey: Uint8Array): ArrayBuffer {
-  const header = new Uint8Array([
-    0x30,
-    0x41,
-    0x02,
-    0x01,
-    0x00,
-    0x30,
-    0x13,
-    0x06,
-    0x07,
-    0x2a,
-    0x86,
-    0x48,
-    0xce,
-    0x3d,
-    0x02,
-    0x01,
-    0x06,
-    0x08,
-    0x2a,
-    0x86,
-    0x48,
-    0xce,
-    0x3d,
-    0x03,
-    0x01,
-    0x07,
-    0x04,
-    0x27,
-    0x30,
-    0x25,
-    0x02,
-    0x01,
-    0x01,
-    0x04,
-    0x20,
-  ]);
-  const result = new Uint8Array(header.length + 32);
-  result.set(header);
-  result.set(rawPrivateKey, header.length);
-  return result.buffer as ArrayBuffer;
-}
