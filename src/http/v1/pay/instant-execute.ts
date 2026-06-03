@@ -281,7 +281,10 @@ export function handleExecuteInstant(
         // Sign the deposit op with the OpEx Ed25519 key — browser-wallet's
         // deposit pattern requires the depositor's signature on the deposit
         // op (separate from the SAC transfer that moves XLM).
-        const expirationLedger = 999_999_999;
+        // Expiration must be `<= latestLedger + maxOffset` per the channel
+        // contract — match lifecycle's lib/client/deposit.ts: latest + 1000.
+        const latestLedger = await server.getLatestLedger();
+        const expirationLedger = latestLedger.sequence + 1000;
         const depositOp = await MoonlightOperation.deposit(
           opexKeypair.publicKey() as `G${string}`,
           depositTotalStroops,
