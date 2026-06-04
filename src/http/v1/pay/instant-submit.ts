@@ -3,7 +3,6 @@ import { drizzleClient } from "@/persistence/drizzle/config.ts";
 import { CouncilRepository } from "@/persistence/drizzle/repository/council.repository.ts";
 import { CouncilChannelRepository } from "@/persistence/drizzle/repository/council-channel.repository.ts";
 import { CouncilPpRepository } from "@/persistence/drizzle/repository/council-pp.repository.ts";
-import { ReceiveUtxoRepository } from "@/persistence/drizzle/repository/receive-utxo.repository.ts";
 import { TransactionRepository } from "@/persistence/drizzle/repository/transaction.repository.ts";
 import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-account.repository.ts";
 import { getProviderJwt } from "@/core/service/provider-auth.ts";
@@ -13,12 +12,16 @@ import { withSpan } from "@/core/tracing.ts";
 const councilRepo = new CouncilRepository(drizzleClient);
 const channelRepo = new CouncilChannelRepository(drizzleClient);
 const ppRepo = new CouncilPpRepository(drizzleClient);
-const utxoRepo = new ReceiveUtxoRepository(drizzleClient);
 const txRepo = new TransactionRepository(drizzleClient);
 const accountRepo = new PayAccountRepository(drizzleClient);
 
 /**
  * POST /api/v1/pay/instant/submit
+ *
+ * Self-custodial flow: the customer has built the full MLXDR bundle locally
+ * using the merchant's UTXO public keys returned by /instant/prepare.
+ * pay-platform forwards the bundle to provider-platform after looking up
+ * the council/channel/PP for the merchant's jurisdiction.
  *
  * Body: {
  *   customerWallet,
@@ -26,19 +29,8 @@ const accountRepo = new PayAccountRepository(drizzleClient);
  *   amountStroops,
  *   assetCode,
  *   description?,
- *   operationsMLXDR,       — all operations built by the frontend
- *   merchantUtxoIds,       — IDs to mark as SPENT
+ *   operationsMLXDR,
  * }
- *
- * The frontend builds ALL operations (deposit + temp creates + temp spends +
- * merchant creates) because it holds the customer's signing context.
- *
- * Pay-platform's job:
- *   1. Look up the council + channel + PP from the asset code and merchant jurisdiction
- *   2. Authenticate with provider-platform server-side (PAY_SERVICE_SK)
- *   3. Submit the bundle to provider-platform
- *   4. Record the transaction
- *   5. Mark merchant UTXOs as SPENT
  */
 export function handleSubmitInstant(
   deps: { log: Logger },
@@ -57,7 +49,6 @@ export function handleSubmitInstant(
           assetCode: requestedAsset,
           description,
           operationsMLXDR,
-          merchantUtxoIds,
         } = body;
 
         if (
@@ -77,12 +68,6 @@ export function handleSubmitInstant(
         span.setAttribute("asset.code", assetCode);
         span.setAttribute("amount.stroops", amountStroops.toString());
 
-        log.debug("merchantWallet", merchantWallet);
-        log.debug("customerWallet", customerWallet);
-        log.debug("assetCode", assetCode);
-        log.debug("amountStroops", amountStroops.toString());
-
-        // Look up merchant to get jurisdiction
         const merchant = await accountRepo.findByPublicKey(merchantWallet);
         if (!merchant) {
           ctx.response.status = Status.NotFound;
@@ -90,7 +75,6 @@ export function handleSubmitInstant(
           return;
         }
 
-        // Find a council covering the merchant's jurisdiction with the requested asset
         const councils = await councilRepo.findByJurisdiction(
           merchant.jurisdictionCountryCode,
         );
@@ -108,38 +92,28 @@ export function handleSubmitInstant(
             break;
           }
         }
-
         if (!selectedCouncil || !selectedChannel) {
           ctx.response.status = Status.ServiceUnavailable;
           ctx.response.body = {
             message: `No ${assetCode} channel available for this merchant`,
           };
-          if (Array.isArray(merchantUtxoIds)) {
-            await utxoRepo.release(merchantUtxoIds);
-          }
           return;
         }
         span.setAttribute("council.id", selectedCouncil.id);
         span.setAttribute("channel.id", selectedChannel.id);
 
-        // Pick a PP
         const pps = await ppRepo.findActiveByCouncilId(selectedCouncil.id);
         if (pps.length === 0) {
           ctx.response.status = Status.ServiceUnavailable;
           ctx.response.body = { message: "No privacy provider available" };
-          if (Array.isArray(merchantUtxoIds)) {
-            await utxoRepo.release(merchantUtxoIds);
-          }
           return;
         }
         const pp = pps[Math.floor(Math.random() * pps.length)];
         span.setAttribute("pp.id", pp.id);
 
-        // Authenticate with provider-platform server-side
         log.event("authenticating with provider-platform");
         const providerJwt = await getProviderJwt(pp.url, { log });
 
-        // Submit the bundle to provider-platform
         log.event("submitting bundle to provider-platform");
         const bundleRes = await fetch(
           `${pp.url}/api/v1/providers/${pp.publicKey}/entity/bundles`,
@@ -168,9 +142,6 @@ export function handleSubmitInstant(
           ctx.response.body = {
             message: "Payment processing failed — provider rejected the bundle",
           };
-          if (Array.isArray(merchantUtxoIds)) {
-            await utxoRepo.release(merchantUtxoIds);
-          }
           return;
         }
 
@@ -179,12 +150,6 @@ export function handleSubmitInstant(
           bundleData?.operationsBundleId ?? null;
         if (bundleId) span.setAttribute("bundle.id", bundleId);
 
-        // Mark merchant UTXOs as SPENT
-        if (Array.isArray(merchantUtxoIds) && merchantUtxoIds.length > 0) {
-          await utxoRepo.markSpent(merchantUtxoIds);
-        }
-
-        // Record merchant IN transaction
         const inTx = await txRepo.create({
           walletPublicKey: merchantWallet,
           direction: "IN",
@@ -198,7 +163,6 @@ export function handleSubmitInstant(
           completedAt: new Date(),
         });
 
-        // Record customer OUT transaction only if they have a pay-platform account
         let outTxId: string | null = null;
         const customerAccount = await accountRepo.findByPublicKey(
           customerWallet,

@@ -5,7 +5,6 @@ import { buildWaitlistRouter } from "@/http/v1/waitlist/routes.ts";
 import { buildAuthRouter } from "@/http/v1/auth/routes.ts";
 import { buildAccountRouter } from "@/http/v1/account/routes.ts";
 import { buildAdminRouter } from "@/http/v1/admin/routes.ts";
-import { buildUtxoRouter } from "@/http/v1/utxo/routes.ts";
 import { buildTransactionRouter } from "@/http/v1/transaction/routes.ts";
 import { buildPayRouter } from "@/http/v1/pay/routes.ts";
 
@@ -15,7 +14,6 @@ export function buildApiRouter(deps: { log: Logger }): Router {
   const authRouter = buildAuthRouter(deps);
   const accountRouter = buildAccountRouter(deps);
   const adminRouter = buildAdminRouter(deps);
-  const utxoRouter = buildUtxoRouter(deps);
   const payRouter = buildPayRouter(deps);
   const transactionRouter = buildTransactionRouter(deps);
   const waitlistRouter = buildWaitlistRouter(deps);
@@ -32,7 +30,6 @@ export function buildApiRouter(deps: { log: Logger }): Router {
     accountRouter.allowedMethods(),
   );
   apiRouter.use("/api/v1", adminRouter.routes(), adminRouter.allowedMethods());
-  apiRouter.use("/api/v1", utxoRouter.routes(), utxoRouter.allowedMethods());
   apiRouter.use(
     "/api/v1",
     transactionRouter.routes(),

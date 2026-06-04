@@ -3,26 +3,37 @@ import { drizzleClient } from "@/persistence/drizzle/config.ts";
 import { CouncilRepository } from "@/persistence/drizzle/repository/council.repository.ts";
 import { CouncilChannelRepository } from "@/persistence/drizzle/repository/council-channel.repository.ts";
 import { CouncilPpRepository } from "@/persistence/drizzle/repository/council-pp.repository.ts";
-import { ReceiveUtxoRepository } from "@/persistence/drizzle/repository/receive-utxo.repository.ts";
 import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-account.repository.ts";
+import { decryptSk } from "@/core/crypto/encrypt-sk.ts";
+import { deriveUtxoPublicKey } from "@/core/crypto/utxo-derivation.ts";
+import { getChannelClient } from "@/core/channel-client/index.ts";
+import { findFreeUtxoIndexes } from "@/core/service/utxo/utxo-balance.ts";
+import {
+  SERVICE_AUTH_SECRET,
+  STELLAR_NETWORK_PASSPHRASE,
+} from "@/config/env.ts";
 import type { Logger } from "@/utils/logger/index.ts";
-import { STELLAR_NETWORK_PASSPHRASE } from "@/config/env.ts";
 import { withSpan } from "@/core/tracing.ts";
 
 const councilRepo = new CouncilRepository(drizzleClient);
 const channelRepo = new CouncilChannelRepository(drizzleClient);
 const ppRepo = new CouncilPpRepository(drizzleClient);
-const utxoRepo = new ReceiveUtxoRepository(drizzleClient);
 const accountRepo = new PayAccountRepository(drizzleClient);
+
+const MERCHANT_UTXO_DESTINATIONS = 5;
+
+function bytesToBase64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
 
 /**
  * POST /api/v1/pay/instant/prepare
  *
  * Body: { merchantWallet, amountXlm, customerWallet, assetCode?, payerJurisdiction? }
  *
- * Returns the council config (including the channel for the requested asset),
- * a privacy provider URL, and the merchant's receive UTXO public keys so
- * the frontend can build the deposit operation.
+ * Returns the council/channel config, a privacy provider URL, and the
+ * merchant's next available receive UTXO public keys derived on demand
+ * from the encrypted delegation key.
  */
 export function handlePrepareInstant(
   deps: { log: Logger },
@@ -53,12 +64,9 @@ export function handlePrepareInstant(
 
         span.setAttribute("merchant.public_key", merchantWallet);
         span.setAttribute("customer.public_key", customerWallet);
-        log.debug("merchantWallet", merchantWallet);
-        log.debug("customerWallet", customerWallet);
 
         const assetCode = requestedAsset || "XLM";
         span.setAttribute("asset.code", assetCode);
-        log.debug("assetCode", assetCode);
 
         const amount = parseFloat(amountXlm);
         if (isNaN(amount) || amount <= 0) {
@@ -69,15 +77,20 @@ export function handlePrepareInstant(
           return;
         }
 
-        // Look up the merchant
         const merchant = await accountRepo.findByPublicKey(merchantWallet);
         if (!merchant) {
           ctx.response.status = Status.NotFound;
           ctx.response.body = { message: "Merchant not found" };
           return;
         }
+        if (!merchant.encryptedDelegationKey) {
+          ctx.response.status = Status.ServiceUnavailable;
+          ctx.response.body = {
+            message: "Merchant has not finished onboarding",
+          };
+          return;
+        }
 
-        // Find a council covering the merchant's jurisdiction
         let councils;
         if (payerJurisdiction) {
           councils = await councilRepo.findByJurisdictionPair(
@@ -105,7 +118,6 @@ export function handlePrepareInstant(
           }
         }
 
-        // Find a council that has the requested asset channel
         let selectedCouncil = null;
         let selectedChannel = null;
         for (const c of councils) {
@@ -128,11 +140,9 @@ export function handlePrepareInstant(
           };
           return;
         }
-
         span.setAttribute("council.id", selectedCouncil.id);
         span.setAttribute("channel.id", selectedChannel.id);
 
-        // Pick a privacy provider within the council
         const pps = await ppRepo.findActiveByCouncilId(selectedCouncil.id);
         if (pps.length === 0) {
           ctx.response.status = Status.ServiceUnavailable;
@@ -144,26 +154,40 @@ export function handlePrepareInstant(
         const pp = pps[Math.floor(Math.random() * pps.length)];
         span.setAttribute("pp.id", pp.id);
 
-        // Get merchant's available receive UTXOs (5 for privacy distribution)
-        const merchantUtxos = await utxoRepo.findAvailable(merchantWallet, 5);
-        if (merchantUtxos.length === 0) {
-          ctx.response.status = Status.ServiceUnavailable;
-          ctx.response.body = {
-            message: "Merchant has no available receive addresses",
-          };
-          return;
-        }
+        const utxoRootBase64 = await decryptSk(
+          merchant.encryptedDelegationKey,
+          SERVICE_AUTH_SECRET,
+        );
+        const utxoRoot = Uint8Array.from(
+          atob(utxoRootBase64),
+          (c) => c.charCodeAt(0),
+        );
 
-        // Reserve the UTXOs so they're not used by concurrent payments
-        await utxoRepo.reserve(merchantUtxos.map((u) => u.id));
+        const channelClient = getChannelClient(
+          selectedChannel.privacyChannelId,
+          selectedCouncil.channelAuthId,
+          selectedChannel.assetContractId,
+        );
+
+        const freeIndexes = await findFreeUtxoIndexes(
+          channelClient,
+          utxoRoot,
+          MERCHANT_UTXO_DESTINATIONS,
+          { log },
+        );
+
+        const merchantUtxos = await Promise.all(
+          freeIndexes.map(async (index) => ({
+            utxoPublicKey: bytesToBase64(
+              await deriveUtxoPublicKey(utxoRoot, index),
+            ),
+            derivationIndex: index,
+          })),
+        );
 
         const amountStroops = BigInt(Math.round(amount * 1e7));
         span.setAttribute("amount.stroops", amountStroops.toString());
 
-        log.debug("amountStroops", amountStroops.toString());
-        log.debug("councilId", selectedCouncil.id);
-        log.debug("channelId", selectedChannel.id);
-        log.debug("ppId", pp.id);
         log.event("instant payment prepared");
 
         ctx.response.body = {
@@ -185,13 +209,8 @@ export function handlePrepareInstant(
             },
             opex: {
               publicKey: merchant.opexPublicKey ?? null,
-              feePct: merchant.feePct ? Number(merchant.feePct) : null,
             },
-            merchantUtxos: merchantUtxos.map((u) => ({
-              id: u.id,
-              utxoPublicKey: u.utxoPublicKey,
-              derivationIndex: u.derivationIndex,
-            })),
+            merchantUtxos,
             amountStroops: amountStroops.toString(),
           },
         };

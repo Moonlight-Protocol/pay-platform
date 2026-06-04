@@ -15,7 +15,7 @@ const accountRepo = new PayAccountRepository(drizzleClient);
  * the keypair deterministically from the master seed, funds it, and sends
  * the secret key here for server-side storage.
  *
- * Body: { secretKey, publicKey, feePct }
+ * Body: { secretKey, publicKey }
  */
 export function handlePostOpex(
   deps: { log: Logger },
@@ -30,7 +30,7 @@ export function handlePostOpex(
       log.debug("walletPublicKey", walletPublicKey);
 
       const body = await ctx.request.body.json().catch(() => ({}));
-      const { secretKey, publicKey, feePct } = body;
+      const { secretKey, publicKey } = body;
 
       if (typeof secretKey !== "string" || !secretKey.startsWith("S")) {
         ctx.response.status = Status.BadRequest;
@@ -40,13 +40,6 @@ export function handlePostOpex(
       if (typeof publicKey !== "string" || !publicKey.startsWith("G")) {
         ctx.response.status = Status.BadRequest;
         ctx.response.body = { message: "Invalid publicKey" };
-        return;
-      }
-      if (typeof feePct !== "number" || feePct < 0 || feePct > 100) {
-        ctx.response.status = Status.BadRequest;
-        ctx.response.body = {
-          message: "feePct must be a number between 0 and 100",
-        };
         return;
       }
 
@@ -64,17 +57,15 @@ export function handlePostOpex(
       await accountRepo.update(walletPublicKey, {
         opexPublicKey: publicKey,
         encryptedOpexSk: encrypted,
-        feePct: String(feePct),
       });
 
       log.debug("opexPublicKey", publicKey);
-      log.debug("feePct", feePct);
       log.event("OpEx account registered");
 
       ctx.response.status = Status.OK;
       ctx.response.body = {
         message: "OpEx account registered",
-        data: { opexPublicKey: publicKey, feePct },
+        data: { opexPublicKey: publicKey },
       };
     } catch (error) {
       log.error(error, "failed to register OpEx account");
