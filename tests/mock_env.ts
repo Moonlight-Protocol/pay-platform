@@ -25,5 +25,10 @@ export const SERVICE_AUTH_SECRET = "test-secret-for-tests";
 export const CHALLENGE_TTL = 300;
 export const SESSION_TTL = 3600;
 
+// Server-side Soroban RPC URL (carries the RPC-Pro token on mainnet). The
+// RPC proxy handler forwards to this; tests stub `fetch` so the value is
+// inert — it only needs to exist so the named import resolves.
+export const STELLAR_RPC_URL = "http://localhost:8000/soroban/rpc";
+
 // Test fixture — used by api tests to sign SEP-43/53 challenges.
 export const _TEST_WALLET_KEYPAIR = walletKeypair;

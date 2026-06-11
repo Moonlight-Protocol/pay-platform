@@ -7,6 +7,7 @@ import { buildAccountRouter } from "@/http/v1/account/routes.ts";
 import { buildAdminRouter } from "@/http/v1/admin/routes.ts";
 import { buildTransactionRouter } from "@/http/v1/transaction/routes.ts";
 import { buildPayRouter } from "@/http/v1/pay/routes.ts";
+import { buildRpcRouter } from "@/http/v1/rpc/routes.ts";
 
 export function buildApiRouter(deps: { log: Logger }): Router {
   const apiRouter = new Router();
@@ -16,6 +17,7 @@ export function buildApiRouter(deps: { log: Logger }): Router {
   const adminRouter = buildAdminRouter(deps);
   const payRouter = buildPayRouter(deps);
   const transactionRouter = buildTransactionRouter(deps);
+  const rpcRouter = buildRpcRouter(deps);
   const waitlistRouter = buildWaitlistRouter(deps);
 
   apiRouter.use(
@@ -36,6 +38,7 @@ export function buildApiRouter(deps: { log: Logger }): Router {
     transactionRouter.allowedMethods(),
   );
   apiRouter.use("/api/v1", payRouter.routes(), payRouter.allowedMethods());
+  apiRouter.use("/api/v1", rpcRouter.routes(), rpcRouter.allowedMethods());
   apiRouter.use(
     "/api/v1",
     waitlistRouter.routes(),
