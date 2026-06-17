@@ -112,7 +112,7 @@ export function handleSubmitInstant(
         span.setAttribute("pp.id", pp.id);
 
         log.event("authenticating with provider-platform");
-        const providerJwt = await getProviderJwt(pp.url, { log });
+        const providerJwt = await getProviderJwt(pp.url, pp.publicKey, { log });
 
         log.event("submitting bundle to provider-platform");
         const bundleRes = await fetch(

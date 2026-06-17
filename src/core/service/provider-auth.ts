@@ -18,7 +18,7 @@ interface CachedAuth {
   expiresAt: number; // epoch ms
 }
 
-/** Per-PP URL cache of JWTs. */
+/** Cache of JWTs, keyed by `${ppUrl}|${ppPublicKey}` (tokens are PP-scoped). */
 const cache = new Map<string, CachedAuth>();
 
 /** Re-auth 60s before actual expiry to avoid edge-case failures. */
@@ -48,20 +48,30 @@ function parseJwtExpiry(jwt: string): number {
 }
 
 /**
- * Get a valid JWT for the given provider-platform URL.
+ * Get a valid JWT for the given provider-platform URL + PP.
  * Returns a cached JWT if still valid, otherwise authenticates fresh.
+ *
+ * `ppPublicKey` identifies which PP we're authenticating for: provider's
+ * SEP-10 verify is PP-aware (it scopes the issued JWT + entity status to that
+ * PP), so the token is cached per (ppUrl, ppPublicKey) — a token minted for
+ * one PP must not be reused for another served by the same provider URL.
  */
 export function getProviderJwt(
   ppUrl: string,
+  ppPublicKey: string,
   deps: { log: Logger },
 ): Promise<string> {
   const log = deps.log.scope("getProviderJwt");
   log.info("getProviderJwt");
   log.debug("ppUrl", ppUrl);
+  log.debug("ppPublicKey", ppPublicKey);
+
+  const cacheKey = `${ppUrl}|${ppPublicKey}`;
 
   return withSpan("ProviderAuth.getJwt", async (span) => {
     span.setAttribute("provider.url", ppUrl);
-    const cached = cache.get(ppUrl);
+    span.setAttribute("provider.pp_public_key", ppPublicKey);
+    const cached = cache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now() + EXPIRY_BUFFER_MS) {
       span.setAttribute("provider.jwt.cache_hit", true);
       return cached.jwt;
@@ -110,7 +120,7 @@ export function getProviderJwt(
     const verifyRes = await fetch(`${ppUrl}/api/v1/stellar/auth`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ signedChallenge: signedXdr }),
+      body: JSON.stringify({ signedChallenge: signedXdr, ppPublicKey }),
     });
     if (!verifyRes.ok) {
       throw new Error(
@@ -124,7 +134,7 @@ export function getProviderJwt(
       throw new Error("Provider returned no JWT");
     }
 
-    cache.set(ppUrl, { jwt, expiresAt: parseJwtExpiry(jwt) });
+    cache.set(cacheKey, { jwt, expiresAt: parseJwtExpiry(jwt) });
     log.event("authenticated with provider-platform");
 
     return jwt;
