@@ -295,7 +295,7 @@ export function handleExecuteInstant(
         ];
 
         log.event("submitting bundle to provider-platform");
-        const providerJwt = await getProviderJwt(pp.url, { log });
+        const providerJwt = await getProviderJwt(pp.url, pp.publicKey, { log });
         const bundleRes = await fetch(
           `${pp.url}/api/v1/providers/${pp.publicKey}/entity/bundles`,
           {
