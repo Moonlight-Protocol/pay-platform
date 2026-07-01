@@ -13,7 +13,9 @@ import {
   STELLAR_NETWORK_PASSPHRASE,
 } from "@/config/env.ts";
 import type { Logger } from "@/utils/logger/index.ts";
-import { withSpan } from "@/core/tracing.ts";
+import { SpanStatusCode, withSpan } from "@/core/tracing.ts";
+import { PlatformError } from "@/error/index.ts";
+import { PIPE_APIError } from "@/http/pipelines/error-pipeline.ts";
 
 const councilRepo = new CouncilRepository(drizzleClient);
 const channelRepo = new CouncilChannelRepository(drizzleClient);
@@ -216,8 +218,18 @@ export function handlePrepareInstant(
         };
       } catch (error) {
         log.error(error, "failed to prepare instant payment");
-        ctx.response.status = Status.InternalServerError;
-        ctx.response.body = { message: "Failed to prepare payment" };
+        const platformError = PlatformError.fromUnknown(error, {
+          source: "@http/v1/pay/instant-prepare",
+          details: "Failed to prepare the instant payment.",
+        });
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: platformError.message,
+        });
+        span.recordException(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        await PIPE_APIError(ctx, deps).run(platformError);
       }
     });
 }

@@ -7,7 +7,10 @@ import { TransactionRepository } from "@/persistence/drizzle/repository/transact
 import { PayAccountRepository } from "@/persistence/drizzle/repository/pay-account.repository.ts";
 import { getProviderJwt } from "@/core/service/provider-auth.ts";
 import type { Logger } from "@/utils/logger/index.ts";
-import { withSpan } from "@/core/tracing.ts";
+import { SpanStatusCode, withSpan } from "@/core/tracing.ts";
+import { PlatformError } from "@/error/index.ts";
+import { PIPE_APIError } from "@/http/pipelines/error-pipeline.ts";
+import { providerBundleRejected } from "@/http/v1/pay/pay.errors.ts";
 
 const councilRepo = new CouncilRepository(drizzleClient);
 const channelRepo = new CouncilChannelRepository(drizzleClient);
@@ -134,15 +137,7 @@ export function handleSubmitInstant(
           const errBody = await bundleRes.text().catch(() => "");
           log.debug("status", bundleRes.status);
           log.debug("body", errBody);
-          log.error(
-            new Error(`HTTP ${bundleRes.status}`),
-            "provider-platform bundle submission failed",
-          );
-          ctx.response.status = Status.BadGateway;
-          ctx.response.body = {
-            message: "Payment processing failed — provider rejected the bundle",
-          };
-          return;
+          throw providerBundleRejected(bundleRes.status, errBody);
         }
 
         const bundleData = await bundleRes.json().catch(() => ({}));
@@ -197,8 +192,18 @@ export function handleSubmitInstant(
         };
       } catch (error) {
         log.error(error, "failed to submit instant payment");
-        ctx.response.status = Status.InternalServerError;
-        ctx.response.body = { message: "Failed to process payment" };
+        const platformError = PlatformError.fromUnknown(error, {
+          source: "@http/v1/pay/instant-submit",
+          details: "Failed to process the instant payment.",
+        });
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: platformError.message,
+        });
+        span.recordException(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        await PIPE_APIError(ctx, deps).run(platformError);
       }
     });
 }
