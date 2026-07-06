@@ -24,7 +24,13 @@ import {
   STELLAR_RPC_URL,
 } from "@/config/env.ts";
 import type { Logger } from "@/utils/logger/index.ts";
-import { withSpan } from "@/core/tracing.ts";
+import { SpanStatusCode, withSpan } from "@/core/tracing.ts";
+import { PlatformError } from "@/error/index.ts";
+import { PIPE_APIError } from "@/http/pipelines/error-pipeline.ts";
+import {
+  bundleSettlementFailed,
+  providerBundleRejected,
+} from "@/http/v1/pay/pay.errors.ts";
 
 const councilRepo = new CouncilRepository(drizzleClient);
 const channelRepo = new CouncilChannelRepository(drizzleClient);
@@ -315,15 +321,7 @@ export function handleExecuteInstant(
           const errBody = await bundleRes.text().catch(() => "");
           log.debug("status", bundleRes.status);
           log.debug("body", errBody);
-          log.error(
-            new Error(`HTTP ${bundleRes.status}`),
-            "provider bundle submission failed",
-          );
-          ctx.response.status = Status.BadGateway;
-          ctx.response.body = {
-            message: "Payment processing failed — provider rejected the bundle",
-          };
-          return;
+          throw providerBundleRejected(bundleRes.status, errBody);
         }
 
         const bundleData = await bundleRes.json().catch(() => ({}));
@@ -350,9 +348,10 @@ export function handleExecuteInstant(
             });
             if (!pollRes.ok) {
               if (pollRes.status === 429) continue;
-              throw new Error(
-                `Bundle poll failed: ${pollRes.status} ${await pollRes.text()}`,
-              );
+              const errBody = await pollRes.text().catch(() => "");
+              log.debug("pollStatus", pollRes.status);
+              log.debug("pollBody", errBody);
+              throw providerBundleRejected(pollRes.status, errBody);
             }
             const pollData = await pollRes.json().catch(() => ({}));
             const bundleStatus = pollData?.data?.status;
@@ -362,11 +361,18 @@ export function handleExecuteInstant(
               break;
             }
             if (bundleStatus === "FAILED" || bundleStatus === "EXPIRED") {
-              throw new Error(`Bundle ${bundleId} ${bundleStatus}`);
+              throw bundleSettlementFailed({
+                bundleId,
+                outcome: bundleStatus,
+                failureDetail: pollData?.data?.failureDetail,
+              });
             }
           }
           if (!settled) {
-            throw new Error(`Bundle ${bundleId} did not settle within 120 s`);
+            throw bundleSettlementFailed({
+              bundleId,
+              outcome: "did not settle within 120 s",
+            });
           }
           log.event("bundle settled on chain");
         }
@@ -394,8 +400,18 @@ export function handleExecuteInstant(
         };
       } catch (error) {
         log.error(error, "failed to execute instant payment");
-        ctx.response.status = Status.InternalServerError;
-        ctx.response.body = { message: "Failed to process payment" };
+        const platformError = PlatformError.fromUnknown(error, {
+          source: "@http/v1/pay/instant-execute",
+          details: "Failed to process the instant payment.",
+        });
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: platformError.message,
+        });
+        span.recordException(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        await PIPE_APIError(ctx, deps).run(platformError);
       }
     });
 }
