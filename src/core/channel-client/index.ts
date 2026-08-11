@@ -5,7 +5,7 @@
  * channelContractId so on-chain reads (utxo_balances et al) skip the
  * constructor cost on every request.
  */
-import { NetworkConfig } from "@colibri/core";
+import type { NetworkConfig } from "@colibri/core";
 import { PrivacyChannel } from "@moonlight/moonlight-sdk";
 import { NETWORK_CONFIG } from "@/config/env.ts";
 
