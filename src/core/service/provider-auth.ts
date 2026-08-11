@@ -9,7 +9,7 @@
  * the customer interacts only with pay-platform.
  */
 import { Keypair, Transaction } from "stellar-sdk";
-import { PAY_SERVICE_SK } from "@/config/env.ts";
+import { PAY_SERVICE_SK, STELLAR_NETWORK_PASSPHRASE } from "@/config/env.ts";
 import type { Logger } from "@/utils/logger/index.ts";
 import { withSpan } from "@/core/tracing.ts";
 
@@ -103,14 +103,13 @@ export function getProviderJwt(
 
     log.event("challenge received");
 
-    // 2. Co-sign the challenge transaction
-    // The provider uses "Standalone Network ; February 2017" for local,
-    // but we parse the XDR without needing the passphrase for signing —
-    // we just need to add our signature to the envelope.
-    const tx = new Transaction(
-      challengeXdr,
-      challengeData.networkPassphrase ?? "Standalone Network ; February 2017",
-    );
+    // 2. Co-sign the challenge transaction.
+    // The signature is computed over a hash that includes the network
+    // passphrase, so it must be OUR network's passphrase — the provider on the
+    // same network verifies against the same hash. The previous fallback to
+    // the standalone passphrase signed an unverifiable signature on any real
+    // network (AUTH_VR_017 "Missing client signature" on testnet).
+    const tx = new Transaction(challengeXdr, STELLAR_NETWORK_PASSPHRASE);
     tx.sign(keypair);
     const signedXdr = tx.toXDR();
 
