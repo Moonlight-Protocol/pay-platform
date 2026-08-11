@@ -19,6 +19,7 @@ import { getProviderJwt } from "@/core/service/provider-auth.ts";
 import { getChannelClient } from "@/core/channel-client/index.ts";
 import { validateReceiveDestinations } from "@/core/service/utxo/utxo-balance.ts";
 import {
+  HORIZON_URL,
   SERVICE_AUTH_SECRET,
   STELLAR_NETWORK_PASSPHRASE,
   STELLAR_RPC_URL,
@@ -139,12 +140,8 @@ export function handleExecuteInstant(
         span.setAttribute("pp.id", pp.id);
 
         log.event("verifying customer payment on-chain");
-        const horizonUrl = STELLAR_RPC_URL.includes("/soroban/rpc")
-          ? STELLAR_RPC_URL.replace("/soroban/rpc", "")
-          : STELLAR_RPC_URL;
-
         const txRes = await fetch(
-          `${horizonUrl}/transactions/${customerPaymentHash}/operations`,
+          `${HORIZON_URL}/transactions/${customerPaymentHash}/operations`,
         );
         if (!txRes.ok) {
           ctx.response.status = Status.BadRequest;
